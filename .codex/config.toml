@@ -1,0 +1,4 @@
+model = "gpt-5.4"
+approvals_reviewer = "user"
+model_reasoning_effort = "medium"
+trust_level = "trusted"

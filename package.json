@@ -1,0 +1,13 @@
+{
+  "name": "openclaw-team-tools",
+  "private": true,
+  "type": "module",
+  "description": "Instantiation and management tools for isolated multi-container OpenClaw teams.",
+  "scripts": {
+    "discord:validate": "node ./scripts/discord-broker.mjs validate ./discord.routes.json",
+    "discord:run": "node ./scripts/discord-broker.mjs run ./discord.routes.json"
+  },
+  "dependencies": {
+    "discord.js": "^14.19.3"
+  }
+}

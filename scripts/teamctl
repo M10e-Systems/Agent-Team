@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="/workspace/agent-team-tools"
+COMPOSE_FILE="$ROOT/runtime/docker-compose.generated.yml"
+INDEX_FILE="$ROOT/runtime/team-index.json"
+
+need_runtime() {
+  if [[ ! -f "$COMPOSE_FILE" || ! -f "$INDEX_FILE" ]]; then
+    echo "runtime not generated; run: $ROOT/scripts/instantiate-openclaw-teams.mjs" >&2
+    exit 1
+  fi
+}
+
+is_team() {
+  node -e '
+    const idx=require(process.argv[1]);
+    process.exit(idx.teams[process.argv[2]] ? 0 : 1);
+  ' "$INDEX_FILE" "$1"
+}
+
+is_agent() {
+  node -e '
+    const idx=require(process.argv[1]);
+    process.exit(idx.agents[process.argv[2]] ? 0 : 1);
+  ' "$INDEX_FILE" "$1"
+}
+
+team_agents() {
+  node -e '
+    const idx=require(process.argv[1]);
+    const team=idx.teams[process.argv[2]];
+    if (!team) process.exit(2);
+    for (const id of team.agentIds) console.log(id);
+  ' "$INDEX_FILE" "$1"
+}
+
+show_usage() {
+  cat <<'EOF'
+usage:
+  teamctl init
+  teamctl up
+  teamctl down
+  teamctl restart
+  teamctl status
+  teamctl list
+  teamctl ask <agent-id> <message...>
+  teamctl room <team-id> <message...>
+  teamctl heartbeat <team-id> [prompt...]
+  teamctl discord-init
+  teamctl discord-validate [routes-file]
+  teamctl discord-run [routes-file]
+  teamctl discord-inject <channel-id|team-id> <message...>
+  teamctl logs <agent-id>
+  teamctl shell <agent-id>
+  teamctl ps <team-id>
+  teamctl path <agent-id>
+  teamctl dashboard <agent-id>
+
+notes:
+  - team ids: example-team-a, example-team-b
+  - agent ids: example-team-a-facilitator, example-team-a-architect, example-team-a-growth, example-team-b-facilitator, example-team-b-editor, example-team-b-maker
+  - dashboard is informational in the current model; these instances do not run a long-lived gateway by default.
+EOF
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  init)
+    "$ROOT/scripts/instantiate-openclaw-teams.mjs"
+    ;;
+  up)
+    need_runtime
+    docker compose -f "$COMPOSE_FILE" up -d
+    ;;
+  down)
+    need_runtime
+    docker compose -f "$COMPOSE_FILE" down
+    ;;
+  restart)
+    need_runtime
+    docker compose -f "$COMPOSE_FILE" down
+    docker compose -f "$COMPOSE_FILE" up -d
+    ;;
+  status)
+    need_runtime
+    docker ps --format '{{.Names}}\t{{.Status}}' | rg 'openclaw-(example-team-a|example-team-b)' || true
+    ;;
+  list)
+    need_runtime
+    node -e '
+      const idx=require(process.argv[1]);
+      for (const [teamId, team] of Object.entries(idx.teams)) {
+        console.log(`${teamId}: ${team.agentIds.join(", ")}`);
+      }
+    ' "$INDEX_FILE"
+    ;;
+  ask)
+    need_runtime
+    agent="${2:-}"
+    shift 2 || true
+    if [[ -z "$agent" || $# -eq 0 ]]; then
+      show_usage
+      exit 1
+    fi
+    if ! is_agent "$agent"; then
+      echo "unknown agent: $agent" >&2
+      exit 1
+    fi
+    "$ROOT/scripts/openclaw-instance" "$agent" agent --local --agent main --message "$*"
+    ;;
+  room)
+    need_runtime
+    team="${2:-}"
+    shift 2 || true
+    if [[ -z "$team" || $# -eq 0 ]]; then
+      show_usage
+      exit 1
+    fi
+    if ! is_team "$team"; then
+      echo "unknown team: $team" >&2
+      exit 1
+    fi
+    "$ROOT/scripts/team-room" "$team" "$*"
+    ;;
+  heartbeat)
+    need_runtime
+    team="${2:-}"
+    shift 2 || true
+    if [[ -z "$team" ]]; then
+      show_usage
+      exit 1
+    fi
+    if ! is_team "$team"; then
+      echo "unknown team: $team" >&2
+      exit 1
+    fi
+    "$ROOT/scripts/team-heartbeat" "$team" "$@"
+    ;;
+  discord-init)
+    target="$ROOT/discord.routes.json"
+    if [[ -f "$target" ]]; then
+      echo "already exists: $target"
+      exit 0
+    fi
+    cp "$ROOT/discord.routes.example.json" "$target"
+    echo "created: $target"
+    echo "next: fill in your real Discord guild/channel ids, then export DISCORD_BOT_TOKEN and run:"
+    echo "  $ROOT/scripts/teamctl discord-validate"
+    echo "  $ROOT/scripts/teamctl discord-run"
+    ;;
+  discord-validate)
+    need_runtime
+    routes_file="${2:-$ROOT/discord.routes.json}"
+    node "$ROOT/scripts/discord-broker.mjs" validate "$routes_file"
+    ;;
+  discord-run)
+    need_runtime
+    routes_file="${2:-$ROOT/discord.routes.json}"
+    node "$ROOT/scripts/discord-broker.mjs" run "$routes_file"
+    ;;
+  discord-inject)
+    need_runtime
+    target="${2:-}"
+    shift 2 || true
+    if [[ -z "$target" || $# -eq 0 ]]; then
+      show_usage
+      exit 1
+    fi
+    node "$ROOT/scripts/discord-broker.mjs" inject "$ROOT/discord.routes.json" "$target" "$*"
+    ;;
+  logs)
+    need_runtime
+    agent="${2:-}"
+    if [[ -z "$agent" ]]; then
+      show_usage
+      exit 1
+    fi
+    if ! is_agent "$agent"; then
+      echo "unknown agent: $agent" >&2
+      exit 1
+    fi
+    docker logs -f "openclaw-$agent"
+    ;;
+  shell)
+    need_runtime
+    agent="${2:-}"
+    if [[ -z "$agent" ]]; then
+      show_usage
+      exit 1
+    fi
+    if ! is_agent "$agent"; then
+      echo "unknown agent: $agent" >&2
+      exit 1
+    fi
+    exec docker exec -it "openclaw-$agent" sh
+    ;;
+  ps)
+    need_runtime
+    team="${2:-}"
+    if [[ -z "$team" ]]; then
+      show_usage
+      exit 1
+    fi
+    if ! is_team "$team"; then
+      echo "unknown team: $team" >&2
+      exit 1
+    fi
+    while IFS= read -r agent; do
+      docker ps --filter "name=openclaw-$agent" --format '{{.Names}}\t{{.Status}}'
+    done < <(team_agents "$team")
+    ;;
+  path)
+    need_runtime
+    agent="${2:-}"
+    if [[ -z "$agent" ]]; then
+      show_usage
+      exit 1
+    fi
+    node -e '
+      const idx=require(process.argv[1]);
+      const entry=idx.agents[process.argv[2]];
+      if (!entry) process.exit(2);
+      console.log(entry.runtimeStateDir);
+    ' "$INDEX_FILE" "$agent"
+    ;;
+  dashboard)
+    need_runtime
+    agent="${2:-}"
+    if [[ -z "$agent" ]]; then
+      show_usage
+      exit 1
+    fi
+    if ! is_agent "$agent"; then
+      echo "unknown agent: $agent" >&2
+      exit 1
+    fi
+    cat <<EOF
+No dashboard URL is exposed for $agent in the current runtime model.
+
+This is intentional:
+- each container is an isolated OpenClaw home
+- turns run via 'docker exec ... openclaw agent --local ...'
+- no long-lived per-container gateway is bound to a host port
+
+If you want dashboard access later, we can add an alternate gateway-backed mode for selected agents.
+EOF
+    ;;
+  ""|-h|--help|help)
+    show_usage
+    ;;
+  *)
+    echo "unknown command: $cmd" >&2
+    show_usage
+    exit 1
+    ;;
+esac

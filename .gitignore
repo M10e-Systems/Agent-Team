@@ -1,0 +1,4 @@
+runtime/
+discord.routes.json
+.env
+node_modules/

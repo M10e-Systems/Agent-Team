@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "usage: $0 <team-id> <prompt...>" >&2
+  exit 1
+fi
+
+team_id="$1"
+shift
+prompt="$*"
+
+mapfile -t team_info < <(
+  node -e '
+    const idx=require(process.argv[1]);
+    const teamId=process.argv[2];
+    const team=idx.teams[teamId];
+    if (!team) process.exit(2);
+    console.log(team.facilitatorId);
+    for (const id of team.agentIds) {
+      if (id !== team.facilitatorId) console.log(id);
+    }
+  ' /workspace/agent-team-tools/runtime/team-index.json "$team_id"
+)
+
+facilitator="${team_info[0]}"
+specialists=("${team_info[@]:1}")
+force_all="${OPENCLAW_FORCE_ALL_RESPONSES:-0}"
+force_agents_raw="${OPENCLAW_FORCE_AGENT_IDS:-}"
+forced_agents=()
+if [[ -n "$force_agents_raw" ]]; then
+  IFS=',' read -r -a forced_agents <<< "$force_agents_raw"
+fi
+
+is_forced() {
+  local agent="$1"
+  if [[ "$force_all" == "1" ]]; then
+    return 0
+  fi
+  local forced
+  for forced in "${forced_agents[@]:-}"; do
+    if [[ "$forced" == "$agent" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_agent() {
+  local instance="$1"
+  local message="$2"
+  /workspace/agent-team-tools/scripts/openclaw-instance "$instance" agent --local --agent main --message "$message" --thinking "${OPENCLAW_DISCORD_THINKING:-off}" --timeout "${OPENCLAW_AGENT_TIMEOUT:-300}"
+}
+
+transcript=$'USER: '"$prompt"
+
+facilitator_prompt=$(cat <<EOF
+You are in the $team_id team room.
+
+User prompt:
+$prompt
+
+$(if is_forced "$facilitator"; then printf '%s\n' 'You were directly tagged for this round and must reply with one concise message. Do not reply SILENT.'; fi)
+
+Respond as yourself. Keep it brief and useful.
+If you do not need to speak yet, reply exactly SILENT.
+EOF
+)
+
+facilitator_reply="$(run_agent "$facilitator" "$facilitator_prompt" | tail -n 1)"
+if [[ "$facilitator_reply" != "SILENT" ]]; then
+  printf '%s\n' "$facilitator: $facilitator_reply"
+  transcript+=$'\n'"$facilitator: $facilitator_reply"
+elif ! is_forced "$facilitator"; then
+  exit 0
+fi
+
+for specialist in "${specialists[@]}"; do
+  specialist_prompt=$(cat <<EOF
+You are in the $team_id team room.
+
+Current transcript:
+$transcript
+
+$(if is_forced "$specialist"; then printf '%s\n' 'You were directly tagged for this round and must reply with one concise message. Do not reply SILENT.'; else printf '%s\n' 'Speak only if your lens gives you one concrete contribution that is not already covered.'; fi)
+If not, reply exactly SILENT.
+EOF
+)
+  specialist_reply="$(run_agent "$specialist" "$specialist_prompt" | tail -n 1)"
+  if [[ "$specialist_reply" != "SILENT" ]]; then
+    printf '%s\n' "$specialist: $specialist_reply"
+    transcript+=$'\n'"$specialist: $specialist_reply"
+  fi
+done
+
+synthesis_prompt=$(cat <<EOF
+You are the facilitator for the $team_id room.
+
+Current transcript:
+$transcript
+
+If the room needs a short synthesis or next step, give one brief closing message.
+If not, reply exactly SILENT.
+EOF
+)
+
+synthesis_reply="$(run_agent "$facilitator" "$synthesis_prompt" | tail -n 1)"
+if [[ "$synthesis_reply" != "SILENT" ]]; then
+  printf '%s\n' "$facilitator: $synthesis_reply"
+fi

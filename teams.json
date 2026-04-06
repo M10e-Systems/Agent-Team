@@ -1,0 +1,13 @@
+{
+  "teams": [
+    {
+      "teamId": "example-team-a",
+      "repoPath": "/workspace/agent-team-a"
+    },
+    {
+      "teamId": "example-team-b",
+      "repoPath": "/workspace/agent-team-b"
+    }
+  ]
+}
+

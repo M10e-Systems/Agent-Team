@@ -1,0 +1,74 @@
+{
+  "discord": {
+    "guildId": "YOUR_DISCORD_SERVER_ID",
+    "bots": [
+      {
+        "agentId": "example-team-a-facilitator",
+        "tokenEnvVar": "DISCORD_TOKEN_M10E_FACILITATOR"
+      },
+      {
+        "agentId": "example-team-a-architect",
+        "tokenEnvVar": "DISCORD_TOKEN_M10E_ARCHITECT"
+      },
+      {
+        "agentId": "example-team-a-growth",
+        "tokenEnvVar": "DISCORD_TOKEN_M10E_GROWTH"
+      },
+      {
+        "agentId": "example-team-b-facilitator",
+        "tokenEnvVar": "DISCORD_TOKEN_SPARKMILL_FACILITATOR"
+      },
+      {
+        "agentId": "example-team-b-editor",
+        "tokenEnvVar": "DISCORD_TOKEN_SPARKMILL_EDITOR"
+      },
+      {
+        "agentId": "example-team-b-maker",
+        "tokenEnvVar": "DISCORD_TOKEN_SPARKMILL_MAKER"
+      }
+    ],
+    "channels": [
+      {
+        "channelId": "YOUR_M10E_CHANNEL_ID",
+        "teamId": "example-team-a",
+        "mode": "meeting-room",
+        "ingressAgentId": "example-team-a-facilitator"
+      },
+      {
+        "channelId": "YOUR_SPARKMILL_CHANNEL_ID",
+        "teamId": "example-team-b",
+        "mode": "meeting-room",
+        "ingressAgentId": "example-team-b-facilitator"
+      }
+    ],
+    "aliases": {
+      "example-team-a": {
+        "@facilitator": "example-team-a-facilitator",
+        "@architect": "example-team-a-architect",
+        "@growth": "example-team-a-growth"
+      },
+      "example-team-b": {
+        "@facilitator": "example-team-b-facilitator",
+        "@editor": "example-team-b-editor",
+        "@maker": "example-team-b-maker"
+      }
+    },
+    "responsePolicy": {
+      "ignoreUnknownChannels": true,
+      "ignoreBotMessages": true,
+      "reactWhileProcessing": true,
+      "typingWhileProcessing": true,
+      "typingRefreshMs": 8000,
+      "progressNotices": true,
+      "progressNoticeAfterMs": 20000,
+      "progressNoticeRepeatMs": 60000,
+      "processingTimeoutMs": 600000,
+      "perTurnDelayMs": 500,
+      "presence": {
+        "status": "online",
+        "activityType": "watching",
+        "activityName": "team prompts"
+      }
+    }
+  }
+}
