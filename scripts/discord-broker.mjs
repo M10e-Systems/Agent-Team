@@ -4,7 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { Readable, Writable } from "node:stream";
+import {
+  ClientSideConnection,
+  PROTOCOL_VERSION,
+  ndJsonStream,
+} from "@agentclientprotocol/sdk";
 import {
   ActivityType,
   Client,
@@ -24,6 +30,7 @@ function usage() {
   console.error("  node scripts/discord-broker.mjs validate [routes-file]");
   console.error("  node scripts/discord-broker.mjs run [routes-file]");
   console.error("  node scripts/discord-broker.mjs inject <routes-file> <channel-id|team-id> <message...>");
+  console.error("  node scripts/discord-broker.mjs provider-doctor [routes-file]");
 }
 
 function readJson(filePath) {
@@ -201,6 +208,398 @@ function buildOpenClawDiscordEnv(config) {
     OPENCLAW_AGENT_TIMEOUT: String(policy.openclawAgentTimeoutSec || process.env.OPENCLAW_AGENT_TIMEOUT || "45"),
     OPENCLAW_WALL_TIMEOUT: String(policy.openclawWallTimeout || process.env.OPENCLAW_WALL_TIMEOUT || "90s"),
   };
+}
+
+function resolveAgentProvider(config = globalThis.__discordBrokerConfig) {
+  const provider = String(
+    process.env.TEAM_AGENT_PROVIDER ||
+      config?.discord?.responsePolicy?.agentProvider ||
+      "openclaw",
+  ).trim();
+  if (!["openclaw", "codex-acp"].includes(provider)) {
+    throw new Error(`unsupported TEAM_AGENT_PROVIDER '${provider}' (expected openclaw or codex-acp)`);
+  }
+  return provider;
+}
+
+function resolveProcessingTimeoutMs(config, fallbackMs) {
+  const value = process.env.TEAM_AGENT_TIMEOUT_MS ?? config.discord.responsePolicy?.processingTimeoutMs ?? fallbackMs;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallbackMs;
+}
+
+function readTextFileIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  return fs.readFileSync(filePath, "utf8").trim();
+}
+
+function loadAgentPromptParts(index, agentId) {
+  const agent = index.agents?.[agentId];
+  if (!agent) {
+    throw new Error(`unknown agent '${agentId}'`);
+  }
+
+  const workspacePath = path.join(agent.repoPath, "agents", agentId, "workspace");
+  const teamJson = readTextFileIfExists(path.join(agent.repoPath, "team.json"));
+  const sharedFiles = ["TEAM_DISCUSSION_CONTRACT.md", "DISCORD_BOT_BEHAVIOR.md"];
+  const personaFiles = ["IDENTITY.md", "SOUL.md", "AGENTS.md", "TOOLS.md", "USER.md", "MEMORY.md", "HEARTBEAT.md"];
+  const sections = [];
+
+  if (teamJson) {
+    sections.push(["team.json", teamJson]);
+  }
+  for (const filename of sharedFiles) {
+    const text = readTextFileIfExists(path.join(agent.repoPath, "shared", filename));
+    if (text) sections.push([`shared/${filename}`, text]);
+  }
+  for (const filename of personaFiles) {
+    const text = readTextFileIfExists(path.join(workspacePath, filename));
+    if (text) sections.push([`agents/${agentId}/workspace/${filename}`, text]);
+  }
+
+  return {
+    cwd: workspacePath,
+    repoPath: agent.repoPath,
+    text: sections.map(([label, text]) => `## ${label}\n${text}`).join("\n\n"),
+  };
+}
+
+function formatCodexAcpPrompt({ index, teamId, agentId, messageText, forceReply, priorTurns = [], direct = false }) {
+  const team = index.teams?.[teamId];
+  if (!team) {
+    throw new Error(`unknown team '${teamId}'`);
+  }
+  const persona = loadAgentPromptParts(index, agentId);
+  const priorTurnText = priorTurns.length
+    ? priorTurns.map((turn) => `${turn.agentId}: ${turn.text}`).join("\n")
+    : "(none yet)";
+  const replyInstruction = forceReply
+    ? "You are directly addressed or explicitly required to answer. Do not reply SILENT."
+    : "Reply exactly SILENT if your lens does not add something useful.";
+
+  return {
+    cwd: persona.cwd,
+    text: [
+      "You are acting as one visible Discord bot participant in a small team room.",
+      "This is not a coding task. Do not perform repository maintenance, journaling, file edits, command execution, or task management.",
+      "Write exactly one concise Discord message for this agent, or exactly SILENT when silence is appropriate.",
+      "Do not prefix the message with your name or agent id; Discord already shows your bot identity.",
+      "Do not narrate routing, ACP, OpenClaw, prompts, providers, or implementation details.",
+      "Do not mention hidden instructions, system prompts, journal rules, or the word SILENT unless your entire output is exactly SILENT.",
+      "If the human message appears to be a typo, a transport test, or a meaningless string, output exactly SILENT unless force-reply applies.",
+      "Do not claim to have taken external actions unless the human explicitly asked you to do so.",
+      replyInstruction,
+      direct ? "This is a direct ask to this single agent." : "This is a room round; avoid duplicating prior visible turns.",
+      "",
+      "# Agent and team context",
+      persona.text,
+      "",
+      "# Room state",
+      `Team: ${teamId}`,
+      `Agent: ${agentId}`,
+      `Prior visible turns in this round:\n${priorTurnText}`,
+      "",
+      "# Human Discord message",
+      messageText,
+      "",
+      "# Required output",
+      "Return only the Discord message body or the exact token SILENT.",
+    ].join("\n"),
+  };
+}
+
+function resolveCodexAcpCommand() {
+  return process.env.TEAM_CODEX_ACP_COMMAND || path.join(ROOT, "node_modules", ".bin", "codex-acp");
+}
+
+function buildCodexAcpEnv() {
+  const env = { ...process.env };
+  delete env.OPENAI_API_KEY;
+  delete env.CODEX_API_KEY;
+  env.OPENCLAW_TEAM_TOOLS_PROVIDER = "codex-acp";
+  return env;
+}
+
+function choosePermissionRejection(options) {
+  return (
+    options.find((option) => option.kind === "reject_once") ||
+    options.find((option) => option.kind === "reject_always")
+  );
+}
+
+class CodexAcpProvider {
+  constructor(index) {
+    this.index = index;
+    this.sessions = new Map();
+  }
+
+  async getSession(agentId) {
+    const existing = this.sessions.get(agentId);
+    if (existing && !existing.closed && !existing.active) {
+      return existing;
+    }
+    if (existing?.active) {
+      throw new Error(`codex-acp agent ${agentId} is already processing a turn`);
+    }
+    this.sessions.delete(agentId);
+
+    const persona = loadAgentPromptParts(this.index, agentId);
+    const command = resolveCodexAcpCommand();
+    if (!fs.existsSync(command) && command.includes(path.sep)) {
+      throw new Error(`codex-acp command not found: ${command}`);
+    }
+
+    const child = spawn(command, [], {
+      cwd: persona.cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: buildCodexAcpEnv(),
+    });
+    const handle = {
+      agentId,
+      child,
+      client: null,
+      sessionId: null,
+      stderr: "",
+      active: false,
+      capture: null,
+      closed: false,
+      initResponse: null,
+    };
+    this.sessions.set(agentId, handle);
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      handle.stderr += chunk;
+    });
+    child.on("close", () => {
+      handle.closed = true;
+      if (this.sessions.get(agentId) === handle) {
+        this.sessions.delete(agentId);
+      }
+    });
+
+    if (!child.stdin || !child.stdout) {
+      throw new Error("failed to create codex-acp stdio pipes");
+    }
+
+    const input = Writable.toWeb(child.stdin);
+    const output = Readable.toWeb(child.stdout);
+    const stream = ndJsonStream(input, output);
+    handle.client = new ClientSideConnection(
+      () => ({
+        sessionUpdate: async (params) => {
+          if (params.sessionId !== handle.sessionId || !handle.capture) return;
+          const update = params.update;
+          if (update.sessionUpdate === "agent_message_chunk" && update.content?.type === "text") {
+            handle.capture.push(update.content.text);
+          }
+        },
+        requestPermission: async (params) => {
+          const rejection = choosePermissionRejection(params.options || []);
+          if (rejection) {
+            return { outcome: { outcome: "selected", optionId: rejection.optionId } };
+          }
+          return { outcome: { outcome: "cancelled" } };
+        },
+        readTextFile: async () => {
+          throw new Error("client filesystem reads are disabled for Discord codex-acp turns");
+        },
+        writeTextFile: async () => {
+          throw new Error("client filesystem writes are disabled for Discord codex-acp turns");
+        },
+        createTerminal: async () => {
+          throw new Error("client terminals are disabled for Discord codex-acp turns");
+        },
+      }),
+      stream,
+    );
+
+    handle.initResponse = await handle.client.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: {
+        auth: { terminal: false },
+      },
+      clientInfo: { name: "openclaw-team-tools-discord", version: "1.0.0" },
+    });
+
+    const session = await handle.client.newSession({
+      cwd: persona.cwd,
+      additionalDirectories: [persona.repoPath],
+      mcpServers: [],
+    });
+    handle.sessionId = session.sessionId;
+
+    const model = process.env.TEAM_CODEX_ACP_MODEL?.trim();
+    if (model && typeof handle.client.unstable_setSessionModel === "function") {
+      try {
+        await handle.client.unstable_setSessionModel({ sessionId: handle.sessionId, modelId: model });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`codex-acp model override ignored for ${agentId}: ${message}`);
+      }
+    }
+
+    return handle;
+  }
+
+  async runTurn({ teamId, agentId, messageText, forceReply, priorTurns = [], direct = false, timeoutMs }) {
+    const handle = await this.getSession(agentId);
+    const prompt = formatCodexAcpPrompt({
+      index: this.index,
+      teamId,
+      agentId,
+      messageText,
+      forceReply,
+      priorTurns,
+      direct,
+    });
+
+    handle.active = true;
+    handle.capture = [];
+    let timeoutId = null;
+    let timedOut = false;
+    const promptPromise = handle.client.prompt({
+      sessionId: handle.sessionId,
+      prompt: [{ type: "text", text: prompt.text }],
+    });
+    try {
+      await Promise.race([
+        promptPromise,
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(() => {
+            timedOut = true;
+            void handle.client.cancel({ sessionId: handle.sessionId }).catch(() => {});
+            try {
+              handle.child.kill("SIGTERM");
+            } catch {
+              // ignore
+            }
+            setTimeout(() => {
+              try {
+                if (!handle.closed) handle.child.kill("SIGKILL");
+              } catch {
+                // ignore
+              }
+            }, 1500);
+            reject(new Error(`codex-acp turn for ${agentId} exceeded ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } catch (error) {
+      if (timedOut) throw error;
+      const stderr = handle.stderr.trim();
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(stderr ? `${message}\n${stderr}` : message);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      promptPromise.catch(() => {});
+      handle.active = false;
+    }
+
+    const text = handle.capture.join("").trim();
+    handle.capture = null;
+    return text;
+  }
+
+  async close() {
+    for (const handle of this.sessions.values()) {
+      try {
+        handle.child.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
+    }
+    this.sessions.clear();
+  }
+}
+
+let codexAcpProvider = null;
+
+function getCodexAcpProvider(index) {
+  if (!codexAcpProvider) {
+    codexAcpProvider = new CodexAcpProvider(index);
+    const closeProvider = () => {
+      void codexAcpProvider?.close();
+    };
+    process.once("exit", closeProvider);
+    process.once("SIGINT", () => {
+      closeProvider();
+      process.exit(130);
+    });
+    process.once("SIGTERM", () => {
+      closeProvider();
+      process.exit(143);
+    });
+  }
+  return codexAcpProvider;
+}
+
+async function closeCodexAcpProviderIfStarted() {
+  if (!codexAcpProvider) return;
+  const provider = codexAcpProvider;
+  codexAcpProvider = null;
+  await provider.close();
+}
+
+function normalizeVisibleReply(reply, { forceReply = false } = {}) {
+  const text = String(reply || "").trim();
+  const unquoted = text.replace(/^[`"'\s]+|[`"'\s]+$/g, "").trim();
+  if (!text || /^SILENT[.!]*$/i.test(unquoted)) return null;
+  if (!forceReply && /\bSILENT\b/i.test(text) && /\b(prompt|routing|provider|journal|instruction|single message)\b/i.test(text)) {
+    return null;
+  }
+  return text;
+}
+
+async function runCodexAcpDirect(index, teamId, agentId, messageText, processingTimeoutMs) {
+  const reply = await getCodexAcpProvider(index).runTurn({
+    teamId,
+    agentId,
+    messageText,
+    forceReply: true,
+    direct: true,
+    timeoutMs: processingTimeoutMs,
+  });
+  return { reply: normalizeVisibleReply(reply, { forceReply: true }) ?? "SILENT" };
+}
+
+async function runCodexAcpRoom(index, teamId, prompt, forcedAgentIds, perTurnDelayMs, processingTimeoutMs, onTurn) {
+  const team = index.teams?.[teamId];
+  if (!team) {
+    throw new Error(`unknown team '${teamId}'`);
+  }
+  const forced = new Set(forcedAgentIds || []);
+  const allForced = forced.size === team.agentIds.length;
+  const priorTurns = [];
+  let turnsSent = 0;
+
+  for (const agentId of team.agentIds) {
+    const forceReply = forced.has(agentId) || allForced;
+    const reply = normalizeVisibleReply(
+      await getCodexAcpProvider(index).runTurn({
+        teamId,
+        agentId,
+        messageText: prompt,
+        forceReply,
+        priorTurns,
+        direct: false,
+        timeoutMs: processingTimeoutMs,
+      }),
+      { forceReply },
+    );
+    if (!reply) continue;
+    const turn = { agentId, text: reply };
+    priorTurns.push(turn);
+    turnsSent += 1;
+    if (onTurn) {
+      await onTurn(turn);
+    }
+    if (perTurnDelayMs > 0) {
+      await sleep(perTurnDelayMs);
+    }
+  }
+
+  return { turnsSent, turns: priorTurns };
 }
 
 function runJsonScript(scriptName, args, timeoutMs) {
@@ -663,12 +1062,15 @@ async function runBroker(routesFileArg) {
         Number(config.discord.responsePolicy?.progressNoticeRepeatMs ?? 0),
       );
       try {
+        const provider = resolveAgentProvider(config);
         const forcedAgentIds = getForcedAgentIdsFromRoute(config, route, index, message, botUserIdToAgentId, text);
         const mentionedAgentId = forcedAgentIds.length === 1 ? forcedAgentIds[0] : null;
 
-        const processingTimeoutMs = Number(config.discord.responsePolicy?.processingTimeoutMs ?? 600000);
+        const processingTimeoutMs = resolveProcessingTimeoutMs(config, 600000);
         if (mentionedAgentId) {
-          const result = runJsonScript("team-discord-ask.mjs", [mentionedAgentId, text], processingTimeoutMs);
+          const result = provider === "codex-acp"
+            ? await runCodexAcpDirect(index, route.teamId, mentionedAgentId, text, processingTimeoutMs)
+            : runJsonScript("team-discord-ask.mjs", [mentionedAgentId, text], processingTimeoutMs);
           if (result.reply && result.reply !== "SILENT") {
             await sendSingleReply(clientsByAgentId, message.channelId, mentionedAgentId, result.reply);
           } else {
@@ -680,19 +1082,30 @@ async function runBroker(routesFileArg) {
             );
           }
         } else {
-          const roomResult = await runStreamingRoom(
-            clientsByAgentId,
-            message.channelId,
-            route.teamId,
-            text,
-            Number(config.discord.responsePolicy?.perTurnDelayMs ?? 500),
-            processingTimeoutMs,
-            {
-              OPENCLAW_FORCE_ALL_RESPONSES:
-                normalizeText(text).includes("@everyone") || normalizeText(text).includes("@here") ? "1" : "0",
-              OPENCLAW_FORCE_AGENT_IDS: forcedAgentIds.join(","),
-            },
-          );
+          const perTurnDelayMs = Number(config.discord.responsePolicy?.perTurnDelayMs ?? 500);
+          const roomResult = provider === "codex-acp"
+            ? await runCodexAcpRoom(
+                index,
+                route.teamId,
+                text,
+                forcedAgentIds,
+                perTurnDelayMs,
+                processingTimeoutMs,
+                (turn) => sendSingleReply(clientsByAgentId, message.channelId, turn.agentId, turn.text),
+              )
+            : await runStreamingRoom(
+                clientsByAgentId,
+                message.channelId,
+                route.teamId,
+                text,
+                perTurnDelayMs,
+                processingTimeoutMs,
+                {
+                  OPENCLAW_FORCE_ALL_RESPONSES:
+                    normalizeText(text).includes("@everyone") || normalizeText(text).includes("@here") ? "1" : "0",
+                  OPENCLAW_FORCE_AGENT_IDS: forcedAgentIds.join(","),
+                },
+              );
           if ((roomResult?.turnsSent ?? 0) === 0) {
             await sendSingleReply(
               clientsByAgentId,
@@ -756,21 +1169,46 @@ async function runInject(routesFileArg, channelOrTeamId, messageText) {
   const ingressAgentId = route.ingressAgentId || index.teams[route.teamId].facilitatorId;
   const forcedAgentIds = getForcedAgentIdsFromRoute(config, route, index, null, new Map(), messageText);
   const mentionedAgentId = forcedAgentIds.length === 1 ? forcedAgentIds[0] : null;
-  const processingTimeoutMs = Number(config.discord.responsePolicy?.processingTimeoutMs ?? 120000);
+  const processingTimeoutMs = resolveProcessingTimeoutMs(config, 120000);
+  const provider = resolveAgentProvider(config);
 
   console.log(`inject routes file: ${routesFile}`);
   console.log(`inject target: ${channelOrTeamId}`);
   console.log(`inject resolved team: ${route.teamId}`);
   console.log(`inject ingress agent: ${ingressAgentId}`);
+  console.log(`inject provider: ${provider}`);
 
   if (mentionedAgentId) {
     console.log(`inject direct target: ${mentionedAgentId}`);
-    const result = runJsonScript("team-discord-ask.mjs", [mentionedAgentId, messageText], processingTimeoutMs);
+    const result = provider === "codex-acp"
+      ? await runCodexAcpDirect(index, route.teamId, mentionedAgentId, messageText, processingTimeoutMs)
+      : runJsonScript("team-discord-ask.mjs", [mentionedAgentId, messageText], processingTimeoutMs);
     if (result.reply && result.reply !== "SILENT") {
       console.log(`${mentionedAgentId}: ${result.reply}`);
+      if (provider === "codex-acp") await closeCodexAcpProviderIfStarted();
       return;
     }
     console.log(`No visible reply from ${mentionedAgentId}.`);
+    if (provider === "codex-acp") await closeCodexAcpProviderIfStarted();
+    return;
+  }
+
+  if (provider === "codex-acp") {
+    const roomResult = await runCodexAcpRoom(
+      index,
+      route.teamId,
+      messageText,
+      forcedAgentIds,
+      Number(config.discord.responsePolicy?.perTurnDelayMs ?? 500),
+      processingTimeoutMs,
+      (turn) => {
+        console.log(`${turn.agentId}: ${turn.text}`);
+      },
+    );
+    if ((roomResult?.turnsSent ?? 0) === 0) {
+      console.log(`Room round finished with no visible reply for ${route.teamId}.`);
+    }
+    await closeCodexAcpProviderIfStarted();
     return;
   }
 
@@ -854,6 +1292,55 @@ function runValidate(routesFileArg) {
   }
 }
 
+function runProviderDoctor(routesFileArg) {
+  loadDotEnv();
+  const { routesFile, config } = loadRoutes(routesFileArg);
+  globalThis.__discordBrokerConfig = config;
+  const index = loadIndex();
+  const errors = validateConfig(config, index);
+  if (errors.length > 0) {
+    throw new Error(`invalid Discord routes config:\n- ${errors.join("\n- ")}`);
+  }
+
+  const provider = resolveAgentProvider(config);
+  console.log(`provider: ${provider}`);
+  console.log(`routes: ${routesFile}`);
+
+  if (provider === "openclaw") {
+    console.log("openclaw provider: configured");
+    console.log("note: run ./scripts/teamctl status for container health.");
+    return;
+  }
+
+  const command = resolveCodexAcpCommand();
+  if (!fs.existsSync(command) && command.includes(path.sep)) {
+    throw new Error(`codex-acp command not found: ${command}`);
+  }
+  console.log(`codex-acp command: ${command}`);
+  console.log(`teams available: ${Object.keys(index.teams).join(", ")}`);
+
+  const login = spawnSync("codex", ["login", "status"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    maxBuffer: 128 * 1024,
+    timeout: 10000,
+    env: process.env,
+  });
+  if (login.error) {
+    throw new Error(`failed to check Codex login status: ${login.error.message}`);
+  }
+  if ((login.status ?? 0) !== 0) {
+    throw new Error(`failed to check Codex login status: ${(login.stderr || login.stdout || "").trim()}`);
+  }
+
+  const loginStatus = `${login.stdout || ""}${login.stderr || ""}`.trim();
+  console.log(`codex login status: ${loginStatus}`);
+  if (!/chatgpt/i.test(loginStatus)) {
+    throw new Error("ChatGPT OAuth login required for TEAM_AGENT_PROVIDER=codex-acp; run `codex login`.");
+  }
+  console.log("codex-acp provider: ready");
+}
+
 const command = process.argv[2];
 const routesFileArg = process.argv[3];
 const injectTarget = process.argv[4];
@@ -871,11 +1358,14 @@ try {
     await runBroker(routesFileArg);
   } else if (command === "inject") {
     await runInject(routesFileArg, injectTarget, injectMessage);
+  } else if (command === "provider-doctor") {
+    runProviderDoctor(routesFileArg);
   } else {
     usage();
     process.exit(1);
   }
 } catch (error) {
+  await closeCodexAcpProviderIfStarted();
   const message = error instanceof Error ? error.message : String(error);
   console.error(message);
   process.exit(1);

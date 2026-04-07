@@ -51,6 +51,7 @@ usage:
   teamctl discord-validate [routes-file]
   teamctl discord-run [routes-file]
   teamctl discord-inject <channel-id|team-id> <message...>
+  teamctl discord-provider-doctor [routes-file]
   teamctl logs <agent-id>
   teamctl shell <agent-id>
   teamctl ps <team-id>
@@ -168,6 +169,11 @@ case "$cmd" in
       exit 1
     fi
     node "$ROOT/scripts/discord-broker.mjs" inject "$ROOT/discord.routes.json" "$target" "$*"
+    ;;
+  discord-provider-doctor)
+    need_runtime
+    routes_file="${2:-$ROOT/discord.routes.json}"
+    node "$ROOT/scripts/discord-broker.mjs" provider-doctor "$routes_file"
     ;;
   logs)
     need_runtime

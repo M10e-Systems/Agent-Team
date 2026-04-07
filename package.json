@@ -8,6 +8,8 @@
     "discord:run": "node ./scripts/discord-broker.mjs run ./discord.routes.json"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.18.1",
+    "@zed-industries/codex-acp": "^0.11.1",
     "discord.js": "^14.19.3"
   }
 }

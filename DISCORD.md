@@ -157,6 +157,7 @@ Operator commands:
 ./scripts/teamctl discord-validate
 DISCORD_BOT_TOKEN=... ./scripts/teamctl discord-run
 ./scripts/teamctl discord-inject example-team-a "We need one concrete next move this week."
+./scripts/teamctl discord-provider-doctor
 ```
 
 Suggested fields:
@@ -203,6 +204,30 @@ Examples:
 ```
 
 This uses the same route resolution and the same room/direct helper scripts as the broker, but prints the resulting turn stream locally instead of sending messages to Discord.
+
+## Agent Provider Selection
+
+The broker supports two backend providers for team turns:
+
+- `openclaw` (default): preserves the original OpenClaw container helper path.
+- `codex-acp`: uses the Agent Client Protocol SDK directly against the local Codex ACP adapter and relies on the existing Codex ChatGPT OAuth login.
+
+Use the Codex ACP provider for the migration experiment:
+
+```bash
+TEAM_AGENT_PROVIDER=codex-acp ./scripts/teamctl discord-provider-doctor
+TEAM_AGENT_PROVIDER=codex-acp ./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"
+TEAM_AGENT_PROVIDER=codex-acp ./scripts/teamctl discord-inject example-team-a "@everyone Everybody say one short OK marker."
+```
+
+Useful provider environment variables:
+
+- `TEAM_AGENT_PROVIDER=openclaw|codex-acp`: selects the backend provider; defaults to `openclaw`.
+- `TEAM_AGENT_TIMEOUT_MS`: per-turn wall-clock timeout in milliseconds for both providers.
+- `TEAM_CODEX_ACP_COMMAND`: optional override for the `codex-acp` command; defaults to the project-local `node_modules/.bin/codex-acp`.
+- `TEAM_CODEX_ACP_MODEL`: optional model override passed through ACP session model selection when supported.
+
+The Codex ACP path does not read OpenClaw OAuth token files and does not require `OPENAI_API_KEY`. It validates auth with `codex login status`; if that does not report ChatGPT login, run `codex login` before using `TEAM_AGENT_PROVIDER=codex-acp`.
 
 ## Example Flow
 
