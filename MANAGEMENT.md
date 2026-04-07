@@ -7,6 +7,33 @@ This toolset uses a simple mental model:
 - **Provider**: the runtime used to produce a reply, currently `codex-acp` by default or `openclaw` explicitly
 - **OpenClaw runtime**: generated state plus Docker containers, kept as a legacy fallback/comparison path
 
+## Motivation
+
+The goal is to keep the useful parts of the original OpenClaw setup without forcing Discord traffic through the heaviest part of the stack.
+
+We want:
+
+- stable specialist personalities
+- predictable room behavior
+- a clear place for memory and behavior contracts
+- a room controller that can stay responsive even when the underlying turn provider is slow
+
+The practical outcome is that the team repos become the durable home for identity and memory, while the provider becomes replaceable infrastructure.
+
+## Prerequisites
+
+Before using the default Discord path:
+
+- run `npm install`
+- create `discord.routes.json` from `discord.routes.example.json`
+- run `codex login` so `codex login status` reports ChatGPT login
+- put Discord bot tokens in `.env`
+
+Before using the legacy OpenClaw container commands:
+
+- run `./scripts/instantiate-openclaw-teams.mjs`
+- have Docker available locally
+
 ## Addressing Rules
 
 Use these names consistently:
@@ -44,6 +71,18 @@ This choice was deliberate because it matches your stated goal better:
 - orchestration happens above the instances, not inside a single OpenClaw runtime
 
 If you later want dashboards or remote control UIs, we can add a second mode where selected containers run a persistent gateway and expose loopback-only ports.
+
+## Theory Of Operation
+
+The current project flow is:
+
+1. keep the team repo files as the source of truth for persona, memory, and behavioral contracts
+2. use `teamctl` or the Discord broker to resolve the target team and agent
+3. choose a provider, with `codex-acp` as the default Discord turn backend
+4. generate the visible response through the provider
+5. post that response through the matching Discord bot identity
+
+For the legacy OpenClaw path, the controller still shells out into per-agent containers. For the current Discord path, the controller talks to Codex ACP directly and leaves OpenClaw out of the hot path.
 
 ## Discord Facilitation
 

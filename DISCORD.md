@@ -4,6 +4,17 @@
 
 This document describes the recommended way to run team discussions on Discord using one visible Discord bot identity per team member while moving the live chat path off the OpenClaw container runtime.
 
+## Motivation
+
+The Discord controller exists so the room feels like a room, not a queue of CPU-heavy backend jobs.
+
+The design goals are:
+
+- keep each specialist's voice stable
+- preserve useful persona and memory inputs from the team repos
+- make progress visible through typing, reactions, and explicit fallback messages
+- keep OpenClaw available only as a legacy provider for comparison or temporary rollback
+
 ## Key Decision
 
 Do **not** let every isolated team container independently manage Discord orchestration.
@@ -21,6 +32,22 @@ This preserves the useful parts of the original design:
 - one visible specialist identity per agent
 - persona and memory files owned by the team repositories
 - orchestration outside the agent runtime
+
+## Prerequisites
+
+To run the default Discord path:
+
+- install dependencies with `npm install`
+- complete `codex login` so `codex login status` reports ChatGPT login
+- create `discord.routes.json` from `discord.routes.example.json`
+- populate `.env` with the bot tokens for the active Discord identities
+- ensure the target Discord server has invited each bot
+
+To run the legacy provider:
+
+- set `TEAM_AGENT_PROVIDER=openclaw`
+- generate the OpenClaw runtime with `./scripts/instantiate-openclaw-teams.mjs`
+- have Docker available locally
 
 ## Why This Fits The Current Runtime Direction
 
@@ -145,6 +172,18 @@ Recommended first version:
 - one Discord app/bot token per visible team member
 - one Discord server
 - one routing file in the tools repo
+
+## Theory Of Operation
+
+At a high level:
+
+1. Discord receives a message in a mapped channel.
+2. The ingress bot captures the message and the broker resolves the team plus mention semantics.
+3. The broker chooses the provider and loads the relevant persona and memory files for the target agent or room.
+4. The provider returns one or more visible turns.
+5. The broker posts those turns back into Discord with the matching bot identity.
+
+Direct mentions are treated as obligations. `@everyone` and `@here` are treated as room-wide obligations. Untagged prompts may still be silent if the room decides nothing useful should be said.
 
 ## Routing File
 
@@ -317,6 +356,6 @@ What you need next:
 Current state:
 
 - documented
-- architecturally aligned with the isolated-instance model
+- architecturally aligned with the provider-neutral team model
 - implemented as a first-pass multi-bot meeting controller in `scripts/discord-broker.mjs`
 - requires local config plus one token per bot before it can be used against a real server
