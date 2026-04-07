@@ -1,92 +1,91 @@
-# OpenClaw Team Tools
+# Agent Team Tools
 
-Tools for running multi-agent Discord team rooms with one visible bot identity per specialist. The current Discord hot path uses Codex ACP by default, while the original OpenClaw container runtime remains available as a legacy fallback and comparison target.
+Tools for building and operating provider-backed agent teams. An agent team is a small group of specialist identities that share a team repo, a discussion contract, and a coordinated surface such as Discord, while keeping their roles and visible voices distinct.
 
-## Motivation
+## What This Is
 
-This repo started as an OpenClaw runtime harness and has now become a Discord room controller with provider-neutral agent identity and memory sources.
+This repository is the operator and integration layer for agent teams.
 
-The current shape exists to solve three problems:
+It helps you:
 
-- keep specialist personas stable across turns
-- make Discord feel like a real room instead of a stuck worker queue
-- keep the original OpenClaw ideas that still work, while removing the expensive runtime from the live chat path
+- define team membership and routing
+- run team discussions through a chosen provider
+- expose those teams on Discord or other surfaces
+- keep team identity and memory in the team repos instead of in one hidden runtime home
 
-The result is intentionally pragmatic:
+## Why Agent Teams
 
-- Codex ACP is the default turn provider for Discord
-- OpenClaw stays available for comparison and legacy commands
-- persona, memory, and behavioral contracts live in the team repos, not in a hidden runtime home
+Agent teams work well when one assistant voice is not enough, but you still want clear boundaries.
 
-## Theory Of Operation
+They give you:
 
-The repo has three layers:
+- stable specialist voices
+- shared team context
+- role-specific memory and prompt material
+- visible collaboration instead of one monolithic assistant pretending to be many roles
+- provider-swappable execution so the team model can outlive any one backend
 
-1. Team repos store the durable agent identity files, shared discussion contracts, and memory notes.
-2. `scripts/teamctl` and `scripts/discord-broker.mjs` resolve a team/channel, choose a provider, and run the turn.
-3. Discord bot identities publish the visible response back into the room.
+## How It Works
 
-For Discord, the important boundary is:
+The team repos define identity, memory, and shared contracts.
 
-- the controller owns routing, typing/progress UX, and provider choice
-- the provider owns the actual response generation
-- the team repo owns the persona and memory inputs
+This tools repo:
 
-That lets us change the runtime under the bots without rewriting the room model itself.
+- reads the registry in `teams.json`
+- generates or resolves runtime state when needed
+- routes turns through the selected provider
+- surfaces the team through Discord or direct local commands
 
-## Prerequisites
+Discord is one surface for operating agent teams, not the definition of the teams themselves.
 
-For the default Discord provider:
+## Quick Start
 
-- Node.js and the project dependencies installed with `npm install`
-- `codex login` completed on this machine so `codex login status` reports ChatGPT login
-- a local `.env` file with the Discord bot tokens for the active team
-- `discord.routes.json` created from `discord.routes.example.json`
+1. Install dependencies:
 
-For the legacy OpenClaw commands:
+   ```bash
+   npm install
+   ```
 
-- Docker
-- the generated OpenClaw runtime from `./scripts/instantiate-openclaw-teams.mjs`
+2. Prepare a team registry in `teams.json`.
 
-## Repos
+3. Generate the runtime index and other derived files:
 
-- Team A repo: `../openclaw-team-example-team-a-launch`
-- Team B repo: `../openclaw-team-example-team-b`
+   ```bash
+   ./scripts/teamctl init
+   ```
 
-## Main commands
+4. Create local Discord routing from the public example:
 
-- Regenerate the legacy OpenClaw runtime homes and compose:
-  - `./scripts/instantiate-openclaw-teams.mjs`
-- Preferred operator entrypoint:
-  - `./scripts/teamctl`
-- Start all legacy team containers:
-  - `docker compose -f ./runtime/docker-compose.generated.yml up -d`
-- Stop all legacy team containers:
-  - `docker compose -f ./runtime/docker-compose.generated.yml down`
-- Talk to one legacy container:
-  - `./scripts/openclaw-instance example-team-a-facilitator agent --local --agent main --message "What are you watching?"`
-- Run a legacy room round:
-  - `./scripts/team-room example-team-a "What is the next best launch move?"`
-- Run a legacy team heartbeat:
-  - `./scripts/team-heartbeat example-team-b`
-- Initialize Discord routing config:
-  - `./scripts/teamctl discord-init`
-- Validate Discord routing config:
-  - `./scripts/teamctl discord-validate`
-- Check the selected Discord agent provider:
-  - `./scripts/teamctl discord-provider-doctor`
-- Test a Discord-routed prompt locally:
-  - `./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"`
-- Run the Discord broker:
-  - `./scripts/teamctl discord-run`
-- Run the legacy OpenClaw provider explicitly:
-  - `TEAM_AGENT_PROVIDER=openclaw ./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"`
+   ```bash
+   ./scripts/teamctl discord-init
+   ```
 
-## Notes
+5. Validate the routing and provider setup:
 
-- Canonical persona and memory files live in the team repos, not in `~/.openclaw`.
-- Discord turns default to `TEAM_AGENT_PROVIDER=codex-acp` and use the local Codex ChatGPT OAuth login.
-- Runtime state is generated into each team repo's `runtime/` directory and is not tracked in git.
-- See `MANAGEMENT.md` for the addressing model, dashboard rationale, and day-to-day commands.
-- See `DISCORD.md` for the Discord broker model, channel routing, and setup flow.
-- See `PROJECT_STATE.md` for the current reopen/handoff state of this repo.
+   ```bash
+   ./scripts/teamctl discord-validate
+   ./scripts/teamctl discord-provider-doctor
+   ```
+
+6. Run a local broker test:
+
+   ```bash
+   ./scripts/teamctl discord-inject example-team-a "We need one concrete next move this week."
+   ```
+
+7. Start the Discord broker:
+
+   ```bash
+   ./scripts/teamctl discord-run
+   ```
+
+## Documentation Map
+
+- [Agent teams concept](docs/agent-teams.md)
+- [Build and operate guide](docs/build-and-operate.md)
+- [Productivity field guide](docs/productivity-field-guide.md)
+- [Reference](docs/reference.md)
+
+## Legacy Note
+
+Some script names, runtime paths, and fallback provider helpers still contain `OpenClaw` because the repository started there. That name now describes legacy implementation details, not the product identity.
