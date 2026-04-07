@@ -46,10 +46,10 @@ show_usage() {
   cat <<'EOF'
 usage:
   teamctl init
-  teamctl up
-  teamctl down
-  teamctl restart
-  teamctl status
+  teamctl up [team-id]
+  teamctl down [team-id]
+  teamctl restart [team-id]
+  teamctl status [team-id]
   teamctl list
   teamctl ask <agent-id> <message...>
   teamctl room <team-id> <message...>
@@ -73,6 +73,35 @@ notes:
 EOF
 }
 
+compose_up_all() {
+  docker compose -f "$COMPOSE_FILE" up -d
+}
+
+compose_up_team() {
+  local team="$1"
+  local services=()
+  while IFS= read -r agent; do
+    services+=("$agent")
+  done < <(team_agents "$team")
+  docker compose -f "$COMPOSE_FILE" up -d "${services[@]}"
+}
+
+compose_down_all() {
+  docker compose -f "$COMPOSE_FILE" down
+}
+
+compose_down_team() {
+  local team="$1"
+  local services=()
+  while IFS= read -r agent; do
+    services+=("$agent")
+  done < <(team_agents "$team")
+
+  # docker compose has no "down <service>" equivalent; stop+rm is the closest.
+  docker compose -f "$COMPOSE_FILE" stop "${services[@]}" || true
+  docker compose -f "$COMPOSE_FILE" rm -f "${services[@]}" || true
+}
+
 cmd="${1:-}"
 case "$cmd" in
   init)
@@ -80,20 +109,57 @@ case "$cmd" in
     ;;
   up)
     need_runtime
-    docker compose -f "$COMPOSE_FILE" up -d
+    team="${2:-}"
+    if [[ -z "$team" ]]; then
+      compose_up_all
+      exit 0
+    fi
+    if ! is_team "$team"; then
+      echo "unknown team: $team" >&2
+      exit 1
+    fi
+    compose_up_team "$team"
     ;;
   down)
     need_runtime
-    docker compose -f "$COMPOSE_FILE" down
+    team="${2:-}"
+    if [[ -z "$team" ]]; then
+      compose_down_all
+      exit 0
+    fi
+    if ! is_team "$team"; then
+      echo "unknown team: $team" >&2
+      exit 1
+    fi
+    compose_down_team "$team"
     ;;
   restart)
     need_runtime
-    docker compose -f "$COMPOSE_FILE" down
-    docker compose -f "$COMPOSE_FILE" up -d
+    team="${2:-}"
+    if [[ -z "$team" ]]; then
+      compose_down_all
+      compose_up_all
+      exit 0
+    fi
+    if ! is_team "$team"; then
+      echo "unknown team: $team" >&2
+      exit 1
+    fi
+    compose_down_team "$team"
+    compose_up_team "$team"
     ;;
   status)
     need_runtime
-    docker ps --format '{{.Names}}\t{{.Status}}' | rg 'openclaw-(example-team-a|example-team-b)' || true
+    team="${2:-}"
+    if [[ -z "$team" ]]; then
+      docker ps --format '{{.Names}}\t{{.Status}}' | rg 'openclaw-(example-team-a|example-team-b)' || true
+      exit 0
+    fi
+    if ! is_team "$team"; then
+      echo "unknown team: $team" >&2
+      exit 1
+    fi
+    "$ROOT/scripts/teamctl" ps "$team"
     ;;
   list)
     need_runtime

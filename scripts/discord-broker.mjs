@@ -419,7 +419,7 @@ class CodexAcpProvider {
       clientCapabilities: {
         auth: { terminal: false },
       },
-      clientInfo: { name: "openclaw-team-tools-discord", version: "1.0.0" },
+      clientInfo: { name: "agent-team-tools-discord", version: "1.0.0" },
     });
 
     const session = await handle.client.newSession({

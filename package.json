@@ -1,8 +1,8 @@
 {
-  "name": "openclaw-team-tools",
+  "name": "agent-team-tools",
   "private": true,
   "type": "module",
-  "description": "Instantiation and management tools for isolated multi-container OpenClaw teams.",
+  "description": "Tools for building and operating provider-backed agent teams.",
   "scripts": {
     "discord:validate": "node ./scripts/discord-broker.mjs validate ./discord.routes.json",
     "discord:run": "node ./scripts/discord-broker.mjs run ./discord.routes.json"
