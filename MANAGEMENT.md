@@ -3,8 +3,9 @@
 This toolset uses a simple mental model:
 
 - **Team**: a discussion group like `example-team-a` or `example-team-b`
-- **Agent**: one isolated OpenClaw home/container like `example-team-a-facilitator`
-- **Runtime**: generated state plus Docker containers
+- **Agent**: one specialist identity like `example-team-a-facilitator`
+- **Provider**: the runtime used to produce a reply, currently `codex-acp` by default or `openclaw` explicitly
+- **OpenClaw runtime**: generated state plus Docker containers, kept as a legacy fallback/comparison path
 
 ## Addressing Rules
 
@@ -46,7 +47,7 @@ If you later want dashboards or remote control UIs, we can add a second mode whe
 
 ## Discord Facilitation
 
-Discord should be treated as a multi-bot meeting surface in front of the team runtime, not as six directly self-orchestrating agent containers.
+Discord should be treated as a multi-bot meeting surface in front of the selected provider, not as six directly self-orchestrating agent containers.
 
 Recommended model:
 
@@ -54,7 +55,7 @@ Recommended model:
 - one Discord bot identity per visible team member
 - one or more Discord channels mapped to team ids
 - one ingress bot per discussion channel, usually the facilitator
-- controller invokes the Discord-aware room/direct helpers
+- controller invokes the selected provider and loads persona/memory files from the team repos
 - controller posts each turn through the correct bot identity
 
 See:
@@ -67,8 +68,11 @@ Run and validate it with:
 ```bash
 ./scripts/teamctl discord-init
 ./scripts/teamctl discord-validate
+./scripts/teamctl discord-provider-doctor
 ./scripts/teamctl discord-run
 ```
+
+The Discord commands use `TEAM_AGENT_PROVIDER=codex-acp` by default and do not require OpenClaw containers. Use `TEAM_AGENT_PROVIDER=openclaw` only when you intentionally want to compare against the legacy helper path.
 
 ## Preferred Operator Surface
 

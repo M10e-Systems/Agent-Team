@@ -1,6 +1,6 @@
 # OpenClaw Team Tools
 
-Tools for instantiating and managing multi-container OpenClaw teams where each container owns its own isolated OpenClaw home and its own `main` agent, including a Discord multi-bot meeting controller.
+Tools for running multi-agent Discord team rooms with one visible bot identity per specialist. The current Discord hot path uses Codex ACP by default, while the original OpenClaw container runtime remains available as a legacy fallback and comparison target.
 
 ## Repos
 
@@ -27,12 +27,19 @@ Tools for instantiating and managing multi-container OpenClaw teams where each c
   - `./scripts/teamctl discord-init`
 - Validate Discord routing config:
   - `./scripts/teamctl discord-validate`
+- Check the selected Discord agent provider:
+  - `./scripts/teamctl discord-provider-doctor`
+- Test a Discord-routed prompt locally:
+  - `./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"`
 - Run the Discord broker:
   - `./scripts/teamctl discord-run`
+- Run the legacy OpenClaw provider explicitly:
+  - `TEAM_AGENT_PROVIDER=openclaw ./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"`
 
 ## Notes
 
-- Canonical prompts live in the team repos, not in `~/.openclaw`.
+- Canonical persona and memory files live in the team repos, not in `~/.openclaw`.
+- Discord turns default to `TEAM_AGENT_PROVIDER=codex-acp` and use the local Codex ChatGPT OAuth login.
 - Runtime state is generated into each team repo's `runtime/` directory and is not tracked in git.
 - See `MANAGEMENT.md` for the addressing model, dashboard rationale, and day-to-day commands.
 - See `DISCORD.md` for the Discord broker model, channel routing, and setup flow.

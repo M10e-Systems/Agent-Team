@@ -2,7 +2,7 @@
 
 ## Intent
 
-This document describes the recommended way to run team discussions on Discord using one visible Discord bot identity per team member without weakening the current isolated-instance architecture.
+This document describes the recommended way to run team discussions on Discord using one visible Discord bot identity per team member while moving the live chat path off the OpenClaw container runtime.
 
 ## Key Decision
 
@@ -13,26 +13,28 @@ Instead, use a **multi-bot meeting controller** that:
 - logs in one Discord bot per team member
 - maps each discussion channel to one team
 - accepts inbound messages through one designated ingress bot per room
-- invokes the existing team orchestration tooling
+- invokes the selected agent provider
 - posts each turn through the matching bot identity
 
-This preserves the core design:
+This preserves the useful parts of the original design:
 
-- one isolated OpenClaw home per agent
-- one `main` per container
-- orchestration outside the instances
+- one visible specialist identity per agent
+- persona and memory files owned by the team repositories
+- orchestration outside the agent runtime
 
-## Why This Fits The Current Runtime
+## Why This Fits The Current Runtime Direction
 
-The current runtime intentionally does not run persistent gateways inside the six team containers.
+The current Discord path is being cleaved away from OpenClaw as the hot-path runtime. The preferred provider is now `codex-acp`, which talks to the local Codex ACP adapter using the existing Codex ChatGPT OAuth login.
 
-That means:
+OpenClaw remains available as an explicit fallback provider, but the live Discord loop should not require containers just to produce chat turns.
 
-- no per-agent Discord bot session is running
-- no per-agent dashboard/gateway port is exposed
-- no agent container is currently a live Discord ingress point
+That means the controller owns:
 
-For Discord group discussions, the clean extension is a **single controller process** in front of many bot identities, not six unrelated Discord automation stacks.
+- Discord sessions and routing
+- role/persona prompt loading
+- forced-response semantics
+- typing/progress UX
+- provider selection and timeouts
 
 ## Mental Model
 
@@ -42,7 +44,8 @@ Think of Discord as a meeting room with assigned seats:
 - Team id = room behind that venue
 - Multi-bot controller = moderator/router
 - Discord bot identities = visible speakers in the room
-- Team containers = isolated specialist brains behind the scenes
+- Team repo persona and memory files = specialist identity source
+- Agent provider = runtime used to produce each reply
 
 ## Recommended Channel Model
 
@@ -203,31 +206,37 @@ Examples:
 ./scripts/teamctl discord-inject 1486747252268466398 "@architect What risk are we underestimating?"
 ```
 
-This uses the same route resolution and the same room/direct helper scripts as the broker, but prints the resulting turn stream locally instead of sending messages to Discord.
+This uses the same route resolution and selected provider as the broker, but prints the resulting turn stream locally instead of sending messages to Discord.
 
 ## Agent Provider Selection
 
 The broker supports two backend providers for team turns:
 
-- `openclaw` (default): preserves the original OpenClaw container helper path.
-- `codex-acp`: uses the Agent Client Protocol SDK directly against the local Codex ACP adapter and relies on the existing Codex ChatGPT OAuth login.
+- `codex-acp` (default): uses the Agent Client Protocol SDK directly against the local Codex ACP adapter and relies on the existing Codex ChatGPT OAuth login.
+- `openclaw`: preserves the original OpenClaw container helper path as an explicit fallback.
 
-Use the Codex ACP provider for the migration experiment:
+Use the provider doctor before starting a live controller:
 
 ```bash
-TEAM_AGENT_PROVIDER=codex-acp ./scripts/teamctl discord-provider-doctor
-TEAM_AGENT_PROVIDER=codex-acp ./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"
-TEAM_AGENT_PROVIDER=codex-acp ./scripts/teamctl discord-inject example-team-a "@everyone Everybody say one short OK marker."
+./scripts/teamctl discord-provider-doctor
+./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"
+./scripts/teamctl discord-inject example-team-a "@everyone Everybody say one short OK marker."
 ```
 
 Useful provider environment variables:
 
-- `TEAM_AGENT_PROVIDER=openclaw|codex-acp`: selects the backend provider; defaults to `openclaw`.
+- `TEAM_AGENT_PROVIDER=codex-acp|openclaw`: selects the backend provider; defaults to `codex-acp`.
 - `TEAM_AGENT_TIMEOUT_MS`: per-turn wall-clock timeout in milliseconds for both providers.
 - `TEAM_CODEX_ACP_COMMAND`: optional override for the `codex-acp` command; defaults to the project-local `node_modules/.bin/codex-acp`.
 - `TEAM_CODEX_ACP_MODEL`: optional model override passed through ACP session model selection when supported.
 
 The Codex ACP path does not read OpenClaw OAuth token files and does not require `OPENAI_API_KEY`. It validates auth with `codex login status`; if that does not report ChatGPT login, run `codex login` before using `TEAM_AGENT_PROVIDER=codex-acp`.
+
+To run the legacy OpenClaw helper path for comparison:
+
+```bash
+TEAM_AGENT_PROVIDER=openclaw ./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"
+```
 
 ## Example Flow
 

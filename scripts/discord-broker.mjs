@@ -214,7 +214,7 @@ function resolveAgentProvider(config = globalThis.__discordBrokerConfig) {
   const provider = String(
     process.env.TEAM_AGENT_PROVIDER ||
       config?.discord?.responsePolicy?.agentProvider ||
-      "openclaw",
+      "codex-acp",
   ).trim();
   if (!["openclaw", "codex-acp"].includes(provider)) {
     throw new Error(`unsupported TEAM_AGENT_PROVIDER '${provider}' (expected openclaw or codex-acp)`);

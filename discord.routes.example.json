@@ -54,6 +54,7 @@
       }
     },
     "responsePolicy": {
+      "agentProvider": "codex-acp",
       "ignoreUnknownChannels": true,
       "ignoreBotMessages": true,
       "reactWhileProcessing": true,

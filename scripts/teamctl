@@ -12,6 +12,13 @@ need_runtime() {
   fi
 }
 
+need_index() {
+  if [[ ! -f "$INDEX_FILE" ]]; then
+    echo "team index not generated; run: $ROOT/scripts/instantiate-openclaw-teams.mjs" >&2
+    exit 1
+  fi
+}
+
 is_team() {
   node -e '
     const idx=require(process.argv[1]);
@@ -61,6 +68,7 @@ usage:
 notes:
   - team ids: example-team-a, example-team-b
   - agent ids: example-team-a-facilitator, example-team-a-architect, example-team-a-growth, example-team-b-facilitator, example-team-b-editor, example-team-b-maker
+  - discord-* commands use the provider-selected runtime and do not require OpenClaw containers.
   - dashboard is informational in the current model; these instances do not run a long-lived gateway by default.
 EOF
 }
@@ -151,17 +159,17 @@ case "$cmd" in
     echo "  $ROOT/scripts/teamctl discord-run"
     ;;
   discord-validate)
-    need_runtime
+    need_index
     routes_file="${2:-$ROOT/discord.routes.json}"
     node "$ROOT/scripts/discord-broker.mjs" validate "$routes_file"
     ;;
   discord-run)
-    need_runtime
+    need_index
     routes_file="${2:-$ROOT/discord.routes.json}"
     node "$ROOT/scripts/discord-broker.mjs" run "$routes_file"
     ;;
   discord-inject)
-    need_runtime
+    need_index
     target="${2:-}"
     shift 2 || true
     if [[ -z "$target" || $# -eq 0 ]]; then
@@ -171,7 +179,7 @@ case "$cmd" in
     node "$ROOT/scripts/discord-broker.mjs" inject "$ROOT/discord.routes.json" "$target" "$*"
     ;;
   discord-provider-doctor)
-    need_runtime
+    need_index
     routes_file="${2:-$ROOT/discord.routes.json}"
     node "$ROOT/scripts/discord-broker.mjs" provider-doctor "$routes_file"
     ;;
