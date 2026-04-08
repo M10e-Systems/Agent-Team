@@ -127,6 +127,11 @@ function normalizeText(value) {
   return String(value || "").toLowerCase();
 }
 
+function logBrokerError(context, error) {
+  const message = error instanceof Error ? `${error.message}\n${error.stack || ""}` : String(error);
+  console.error(`[discord-broker] ${context}: ${message}`.trim());
+}
+
 function validateConfig(config, index) {
   const errors = [];
   const discord = config.discord;
@@ -979,6 +984,150 @@ async function sendSingleReply(clientsByAgentId, channelId, agentId, text) {
   await channel.send(text);
 }
 
+async function safeSendSingleReply(clientsByAgentId, channelId, agentId, text, context = "send reply") {
+  try {
+    await sendSingleReply(clientsByAgentId, channelId, agentId, text);
+    return true;
+  } catch (error) {
+    logBrokerError(`${context} (${agentId} -> ${channelId})`, error);
+    return false;
+  }
+}
+
+async function handleIncomingMessage({ bot, client, message, config, index, clientsByAgentId, botUserIdToAgentId, activeChannels }) {
+  const route = resolveTeamChannel(config, message.channelId);
+  if (message.author.bot && config.discord.responsePolicy?.ignoreBotMessages !== false) {
+    return;
+  }
+  if (!message.guildId || message.guildId !== config.discord.guildId) return;
+  if (!route) {
+    if (config.discord.responsePolicy?.ignoreUnknownChannels) return;
+    return;
+  }
+
+  const ingressAgentId = route.ingressAgentId || index.teams[route.teamId].facilitatorId;
+  if (bot.agentId !== ingressAgentId) {
+    return;
+  }
+
+  const text = message.content?.trim() || "";
+  const forcedAgentIds = getForcedAgentIdsFromRoute(config, route, index, message, botUserIdToAgentId, text);
+  if (!text) {
+    if (
+      forcedAgentIds.length > 0
+      && (message.mentions?.everyone || message.mentions?.users?.size > 0)
+    ) {
+      await safeSendSingleReply(
+        clientsByAgentId,
+        message.channelId,
+        ingressAgentId,
+        "I can see the mention, but not the message text. Enable the Discord Message Content intent for these bots, or mention one bot directly with the full request.",
+        "missing message content hint",
+      );
+    }
+    return;
+  }
+
+  if (activeChannels.has(message.channelId)) {
+    await safeSendSingleReply(
+      clientsByAgentId,
+      message.channelId,
+      ingressAgentId,
+      "Still working on the previous prompt. I’m keeping the busy signal on and will post when this round finishes.",
+      "busy message",
+    );
+    return;
+  }
+
+  activeChannels.add(message.channelId);
+
+  const reaction = await addWorkingReaction(message, config.discord.responsePolicy?.reactWhileProcessing);
+  const stopTyping = await startTypingLoop(
+    clientsByAgentId.get(ingressAgentId),
+    message.channelId,
+    config.discord.responsePolicy?.typingWhileProcessing !== false,
+    Number(config.discord.responsePolicy?.typingRefreshMs ?? 8000),
+  );
+  const stopProgressNotice = await startProgressNoticeLoop(
+    clientsByAgentId.get(ingressAgentId),
+    message.channelId,
+    config.discord.responsePolicy?.progressNotices !== false,
+    Number(config.discord.responsePolicy?.progressNoticeAfterMs ?? 20000),
+    Number(config.discord.responsePolicy?.progressNoticeRepeatMs ?? 0),
+  );
+  try {
+    const provider = resolveAgentProvider(config);
+    const mentionedAgentId = forcedAgentIds.length === 1 ? forcedAgentIds[0] : null;
+
+    const processingTimeoutMs = resolveProcessingTimeoutMs(config, 600000);
+    if (mentionedAgentId) {
+      const result = provider === "codex-acp"
+        ? await runCodexAcpDirect(index, route.teamId, mentionedAgentId, text, processingTimeoutMs)
+        : runJsonScript("team-discord-ask.mjs", [mentionedAgentId, text], processingTimeoutMs);
+      if (result.reply && result.reply !== "SILENT") {
+        await safeSendSingleReply(clientsByAgentId, message.channelId, mentionedAgentId, result.reply, "direct reply");
+      } else {
+        await safeSendSingleReply(
+          clientsByAgentId,
+          message.channelId,
+          ingressAgentId,
+          `Round finished with no visible reply from ${mentionedAgentId}.`,
+          "empty direct reply",
+        );
+      }
+    } else {
+      const perTurnDelayMs = Number(config.discord.responsePolicy?.perTurnDelayMs ?? 500);
+      const roomResult = provider === "codex-acp"
+        ? await runCodexAcpRoom(
+            index,
+            route.teamId,
+            text,
+            forcedAgentIds,
+            perTurnDelayMs,
+            processingTimeoutMs,
+            (turn) => safeSendSingleReply(clientsByAgentId, message.channelId, turn.agentId, turn.text, "room turn"),
+          )
+        : await runStreamingRoom(
+            clientsByAgentId,
+            message.channelId,
+            route.teamId,
+            text,
+            perTurnDelayMs,
+            processingTimeoutMs,
+            {
+              TEAM_AGENT_FORCE_ALL_RESPONSES:
+                normalizeText(text).includes("@everyone") || normalizeText(text).includes("@here") ? "1" : "0",
+              TEAM_AGENT_FORCE_AGENT_IDS: forcedAgentIds.join(","),
+            },
+          );
+      if ((roomResult?.turnsSent ?? 0) === 0) {
+        await safeSendSingleReply(
+          clientsByAgentId,
+          message.channelId,
+          ingressAgentId,
+          `Room round finished with no visible reply for ${route.teamId}.`,
+          "empty room reply",
+        );
+      }
+    }
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    logBrokerError(`message handler ${message.channelId}`, error);
+    await safeSendSingleReply(
+      clientsByAgentId,
+      message.channelId,
+      ingressAgentId,
+      `Controller error: ${messageText}`,
+      "controller error",
+    );
+  } finally {
+    activeChannels.delete(message.channelId);
+    stopProgressNotice();
+    stopTyping();
+    await clearWorkingReaction(reaction);
+  }
+}
+
 async function runBroker(routesFileArg) {
   loadDotEnv();
   ensureSingleBrokerInstance();
@@ -1031,117 +1180,19 @@ async function runBroker(routesFileArg) {
 
   for (const bot of bots) {
     const client = clientsByAgentId.get(bot.agentId);
-    client.on("messageCreate", async (message) => {
-      const route = resolveTeamChannel(config, message.channelId);
-      if (message.author.bot && config.discord.responsePolicy?.ignoreBotMessages !== false) {
-        return;
-      }
-      if (!message.guildId || message.guildId !== config.discord.guildId) return;
-      if (!route) {
-        if (config.discord.responsePolicy?.ignoreUnknownChannels) return;
-        return;
-      }
-
-      const ingressAgentId = route.ingressAgentId || index.teams[route.teamId].facilitatorId;
-      if (bot.agentId !== ingressAgentId) {
-        return;
-      }
-
-      const text = message.content?.trim();
-      if (!text) return;
-
-      if (activeChannels.has(message.channelId)) {
-        const ingressClient = clientsByAgentId.get(ingressAgentId);
-        if (ingressClient) {
-          const channel = await resolveWritableChannel(ingressClient, message.channelId);
-          await channel.send("Still working on the previous prompt. I’m keeping the busy signal on and will post when this round finishes.");
-        }
-        return;
-      }
-
-      activeChannels.add(message.channelId);
-
-      const reaction = await addWorkingReaction(message, config.discord.responsePolicy?.reactWhileProcessing);
-      const stopTyping = await startTypingLoop(
-        clientsByAgentId.get(ingressAgentId),
-        message.channelId,
-        config.discord.responsePolicy?.typingWhileProcessing !== false,
-        Number(config.discord.responsePolicy?.typingRefreshMs ?? 8000),
-      );
-      const stopProgressNotice = await startProgressNoticeLoop(
-        clientsByAgentId.get(ingressAgentId),
-        message.channelId,
-        config.discord.responsePolicy?.progressNotices !== false,
-        Number(config.discord.responsePolicy?.progressNoticeAfterMs ?? 20000),
-        Number(config.discord.responsePolicy?.progressNoticeRepeatMs ?? 0),
-      );
-      try {
-        const provider = resolveAgentProvider(config);
-        const forcedAgentIds = getForcedAgentIdsFromRoute(config, route, index, message, botUserIdToAgentId, text);
-        const mentionedAgentId = forcedAgentIds.length === 1 ? forcedAgentIds[0] : null;
-
-        const processingTimeoutMs = resolveProcessingTimeoutMs(config, 600000);
-        if (mentionedAgentId) {
-          const result = provider === "codex-acp"
-            ? await runCodexAcpDirect(index, route.teamId, mentionedAgentId, text, processingTimeoutMs)
-            : runJsonScript("team-discord-ask.mjs", [mentionedAgentId, text], processingTimeoutMs);
-          if (result.reply && result.reply !== "SILENT") {
-            await sendSingleReply(clientsByAgentId, message.channelId, mentionedAgentId, result.reply);
-          } else {
-            await sendSingleReply(
-              clientsByAgentId,
-              message.channelId,
-              ingressAgentId,
-              `Round finished with no visible reply from ${mentionedAgentId}.`,
-            );
-          }
-        } else {
-          const perTurnDelayMs = Number(config.discord.responsePolicy?.perTurnDelayMs ?? 500);
-          const roomResult = provider === "codex-acp"
-            ? await runCodexAcpRoom(
-                index,
-                route.teamId,
-                text,
-                forcedAgentIds,
-                perTurnDelayMs,
-                processingTimeoutMs,
-                (turn) => sendSingleReply(clientsByAgentId, message.channelId, turn.agentId, turn.text),
-              )
-            : await runStreamingRoom(
-                clientsByAgentId,
-                message.channelId,
-                route.teamId,
-                text,
-                perTurnDelayMs,
-                processingTimeoutMs,
-                {
-                  TEAM_AGENT_FORCE_ALL_RESPONSES:
-                    normalizeText(text).includes("@everyone") || normalizeText(text).includes("@here") ? "1" : "0",
-                  TEAM_AGENT_FORCE_AGENT_IDS: forcedAgentIds.join(","),
-                },
-              );
-          if ((roomResult?.turnsSent ?? 0) === 0) {
-            await sendSingleReply(
-              clientsByAgentId,
-              message.channelId,
-              ingressAgentId,
-              `Room round finished with no visible reply for ${route.teamId}.`,
-            );
-          }
-        }
-      } catch (error) {
-        const messageText = error instanceof Error ? error.message : String(error);
-        const ingressClient = clientsByAgentId.get(ingressAgentId);
-        if (ingressClient) {
-          const channel = await resolveWritableChannel(ingressClient, message.channelId);
-          await channel.send(`Controller error: ${messageText}`);
-        }
-      } finally {
-        activeChannels.delete(message.channelId);
-        stopProgressNotice();
-        stopTyping();
-        await clearWorkingReaction(reaction);
-      }
+    client.on("messageCreate", (message) => {
+      void handleIncomingMessage({
+        bot,
+        client,
+        message,
+        config,
+        index,
+        clientsByAgentId,
+        botUserIdToAgentId,
+        activeChannels,
+      }).catch((error) => {
+        logBrokerError(`unhandled messageCreate ${message.channelId}`, error);
+      });
     });
   }
 
@@ -1359,6 +1410,15 @@ const command = process.argv[2];
 const routesFileArg = process.argv[3];
 const injectTarget = process.argv[4];
 const injectMessage = process.argv.slice(5).join(" ");
+
+process.on("unhandledRejection", (error) => {
+  logBrokerError("unhandled rejection", error);
+});
+
+process.on("uncaughtException", (error) => {
+  logBrokerError("uncaught exception", error);
+  process.exit(1);
+});
 
 if (!command || ["-h", "--help", "help"].includes(command)) {
   usage();

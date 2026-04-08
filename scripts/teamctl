@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$ROOT/runtime/docker-compose.generated.yml"
 INDEX_FILE="$ROOT/runtime/team-index.json"
+BROKER_PID_FILE="$ROOT/runtime/discord-broker.pid"
+BROKER_LOG_FILE="$ROOT/runtime/discord-broker.log"
 AGENT_CONTAINER_PREFIX="${AGENT_CONTAINER_PREFIX:-openclaw}"
 OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw:local}"
 OPENCLAW_REPO_PATH="${OPENCLAW_REPO_PATH:-$ROOT/../openclaw}"
@@ -63,6 +65,9 @@ usage:
   teamctl discord-init
   teamctl discord-validate [routes-file]
   teamctl discord-run [routes-file]
+  teamctl discord-start [routes-file]
+  teamctl discord-stop
+  teamctl discord-status
   teamctl discord-inject <channel-id|team-id> <message...>
   teamctl discord-provider-doctor [routes-file]
   teamctl logs <agent-id>
@@ -75,9 +80,122 @@ notes:
   - team ids depend on your generated runtime; use `teamctl list` to inspect them.
   - agent ids depend on your generated runtime; use `teamctl list` and the team index to inspect them.
   - discord-* commands use the provider-selected runtime and do not require agent containers.
+  - discord-run is foreground; use discord-start/discord-stop/discord-status for managed background operation.
   - dashboard is informational in the current model; these instances do not run a long-lived gateway by default.
   - build uses OPENCLAW_REPO_PATH/OPENCLAW_DOCKERFILE and tags the image as OPENCLAW_IMAGE (defaults to openclaw:local).
 EOF
+}
+
+broker_pid() {
+  if [[ ! -f "$BROKER_PID_FILE" ]]; then
+    return 1
+  fi
+
+  local pid
+  pid="$(tr -d '[:space:]' < "$BROKER_PID_FILE" 2>/dev/null || true)"
+  if [[ -z "$pid" || ! "$pid" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "$pid"
+}
+
+broker_is_running() {
+  local pid
+  pid="$(broker_pid)" || return 1
+  kill -0 "$pid" >/dev/null 2>&1
+}
+
+discord_status() {
+  if broker_is_running; then
+    local pid
+    pid="$(broker_pid)"
+    echo "discord broker: running (pid $pid)"
+    echo "log: $BROKER_LOG_FILE"
+    return 0
+  fi
+
+  if [[ -f "$BROKER_PID_FILE" ]]; then
+    local stale_pid
+    stale_pid="$(tr -d '[:space:]' < "$BROKER_PID_FILE" 2>/dev/null || true)"
+    echo "discord broker: stale pid file (${stale_pid:-unknown})"
+    echo "pid file: $BROKER_PID_FILE"
+    echo "log: $BROKER_LOG_FILE"
+    return 1
+  fi
+
+  echo "discord broker: stopped"
+  echo "log: $BROKER_LOG_FILE"
+  return 1
+}
+
+discord_start() {
+  local routes_file="$1"
+
+  if broker_is_running; then
+    local pid
+    pid="$(broker_pid)"
+    echo "discord broker already running (pid $pid)"
+    echo "log: $BROKER_LOG_FILE"
+    return 0
+  fi
+
+  if [[ -f "$BROKER_PID_FILE" ]]; then
+    rm -f "$BROKER_PID_FILE"
+  fi
+
+  mkdir -p "$(dirname "$BROKER_LOG_FILE")"
+  touch "$BROKER_LOG_FILE"
+
+  setsid -f sh -c '
+    exec node "$0" run "$1" >>"$2" 2>&1 < /dev/null
+  ' "$ROOT/scripts/discord-broker.mjs" "$routes_file" "$BROKER_LOG_FILE"
+
+  for _ in {1..20}; do
+    if broker_is_running; then
+      local broker
+      broker="$(broker_pid)"
+      echo "discord broker started (pid $broker)"
+      echo "log: $BROKER_LOG_FILE"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "discord broker failed to start" >&2
+  echo "log: $BROKER_LOG_FILE" >&2
+  tail -n 40 "$BROKER_LOG_FILE" >&2 || true
+  return 1
+}
+
+discord_stop() {
+  if ! broker_is_running; then
+    if [[ -f "$BROKER_PID_FILE" ]]; then
+      rm -f "$BROKER_PID_FILE"
+      echo "removed stale discord broker pid file"
+      return 0
+    fi
+    echo "discord broker already stopped"
+    return 0
+  fi
+
+  local pid
+  pid="$(broker_pid)"
+  kill "$pid" >/dev/null 2>&1 || true
+
+  for _ in {1..20}; do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      rm -f "$BROKER_PID_FILE"
+      echo "discord broker stopped"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "discord broker did not exit after SIGTERM; sending SIGKILL" >&2
+  kill -KILL "$pid" >/dev/null 2>&1 || true
+  rm -f "$BROKER_PID_FILE"
+  echo "discord broker stopped"
 }
 
 need_openclaw_build_inputs() {
@@ -271,6 +389,17 @@ case "$cmd" in
     need_index
     routes_file="${2:-$ROOT/discord.routes.json}"
     node "$ROOT/scripts/discord-broker.mjs" run "$routes_file"
+    ;;
+  discord-start)
+    need_index
+    routes_file="${2:-$ROOT/discord.routes.json}"
+    discord_start "$routes_file"
+    ;;
+  discord-stop)
+    discord_stop
+    ;;
+  discord-status)
+    discord_status
     ;;
   discord-inject)
     need_index

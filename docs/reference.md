@@ -64,6 +64,9 @@ Primary command surface:
 - `./scripts/teamctl discord-init`
 - `./scripts/teamctl discord-validate [routes-file]`
 - `./scripts/teamctl discord-run [routes-file]`
+- `./scripts/teamctl discord-start [routes-file]`
+- `./scripts/teamctl discord-stop`
+- `./scripts/teamctl discord-status`
 - `./scripts/teamctl discord-inject <channel-id|team-id> <message...>`
 - `./scripts/teamctl discord-provider-doctor [routes-file]`
 - `./scripts/teamctl logs <agent-id>`

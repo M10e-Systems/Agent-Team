@@ -79,6 +79,13 @@ Discord is one surface for operating agent teams, not the definition of the team
    ./scripts/teamctl discord-run
    ```
 
+   Or run it in managed background mode:
+
+   ```bash
+   ./scripts/teamctl discord-start
+   ./scripts/teamctl discord-status
+   ```
+
 ## Documentation Map
 
 - [Agent teams concept](docs/agent-teams.md)

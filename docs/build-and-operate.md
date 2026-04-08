@@ -112,6 +112,16 @@ Local injection is useful for checking:
 
 The controller reads the routing file, loads the team material, chooses the provider, and posts results through the matching Discord bot identities.
 
+For managed background operation, use:
+
+```bash
+./scripts/teamctl discord-start
+./scripts/teamctl discord-status
+./scripts/teamctl discord-stop
+```
+
+`discord-run` stays attached to the current terminal. `discord-start` launches the broker in the background and writes output to `runtime/discord-broker.log`.
+
 ## Operate Day To Day
 
 Common commands:
@@ -125,6 +135,9 @@ Common commands:
 - `./scripts/teamctl ask <agent-id> <message...>`
 - `./scripts/teamctl room <team-id> <message...>`
 - `./scripts/teamctl heartbeat <team-id> [prompt...]`
+- `./scripts/teamctl discord-start [routes-file]`
+- `./scripts/teamctl discord-stop`
+- `./scripts/teamctl discord-status`
 - `./scripts/teamctl logs <agent-id>`
 - `./scripts/teamctl shell <agent-id>`
 - `./scripts/teamctl ps <team-id>`
