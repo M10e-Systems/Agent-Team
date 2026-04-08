@@ -7,7 +7,7 @@
 - `docs/build-and-operate.md` covers setup and operation
 - `docs/productivity-field-guide.md` covers field use
 - `docs/reference.md` is the compact implementation reference
-- `PROJECT_STATE.md` is a handoff/status artifact, not primary navigation
+- Internal handoff/status artifacts are intentionally kept out of the public documentation suite
 
 ## Team Registry
 

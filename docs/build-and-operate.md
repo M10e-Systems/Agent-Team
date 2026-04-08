@@ -92,7 +92,7 @@ Use local injection to exercise the routing logic without writing to Discord:
 
 ```bash
 ./scripts/teamctl discord-inject example-team-a "We need one concrete next move this week."
-./scripts/teamctl discord-inject example-team-a "@architect What risk are we underestimating?"
+./scripts/teamctl discord-inject example-team-a "@specialist What risk are we underestimating?"
 ./scripts/teamctl discord-inject example-team-a "@everyone Everybody say one short marker."
 ```
 

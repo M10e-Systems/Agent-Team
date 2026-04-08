@@ -4,38 +4,38 @@
     "bots": [
       {
         "agentId": "example-team-a-facilitator",
-        "tokenEnvVar": "DISCORD_TOKEN_M10E_FACILITATOR"
+        "tokenEnvVar": "DISCORD_TOKEN_TEAM_A_FACILITATOR"
       },
       {
-        "agentId": "example-team-a-architect",
-        "tokenEnvVar": "DISCORD_TOKEN_M10E_ARCHITECT"
+        "agentId": "example-team-a-specialist",
+        "tokenEnvVar": "DISCORD_TOKEN_TEAM_A_SPECIALIST"
       },
       {
-        "agentId": "example-team-a-growth",
-        "tokenEnvVar": "DISCORD_TOKEN_M10E_GROWTH"
+        "agentId": "example-team-a-closer",
+        "tokenEnvVar": "DISCORD_TOKEN_TEAM_A_CLOSER"
       },
       {
         "agentId": "example-team-b-facilitator",
-        "tokenEnvVar": "DISCORD_TOKEN_SPARKMILL_FACILITATOR"
+        "tokenEnvVar": "DISCORD_TOKEN_TEAM_B_FACILITATOR"
       },
       {
-        "agentId": "example-team-b-editor",
-        "tokenEnvVar": "DISCORD_TOKEN_SPARKMILL_EDITOR"
+        "agentId": "example-team-b-specialist",
+        "tokenEnvVar": "DISCORD_TOKEN_TEAM_B_SPECIALIST"
       },
       {
-        "agentId": "example-team-b-maker",
-        "tokenEnvVar": "DISCORD_TOKEN_SPARKMILL_MAKER"
+        "agentId": "example-team-b-closer",
+        "tokenEnvVar": "DISCORD_TOKEN_TEAM_B_CLOSER"
       }
     ],
     "channels": [
       {
-        "channelId": "YOUR_M10E_CHANNEL_ID",
+        "channelId": "YOUR_TEAM_A_CHANNEL_ID",
         "teamId": "example-team-a",
         "mode": "meeting-room",
         "ingressAgentId": "example-team-a-facilitator"
       },
       {
-        "channelId": "YOUR_SPARKMILL_CHANNEL_ID",
+        "channelId": "YOUR_TEAM_B_CHANNEL_ID",
         "teamId": "example-team-b",
         "mode": "meeting-room",
         "ingressAgentId": "example-team-b-facilitator"
@@ -44,13 +44,13 @@
     "aliases": {
       "example-team-a": {
         "@facilitator": "example-team-a-facilitator",
-        "@architect": "example-team-a-architect",
-        "@growth": "example-team-a-growth"
+        "@specialist": "example-team-a-specialist",
+        "@closer": "example-team-a-closer"
       },
       "example-team-b": {
         "@facilitator": "example-team-b-facilitator",
-        "@editor": "example-team-b-editor",
-        "@maker": "example-team-b-maker"
+        "@specialist": "example-team-b-specialist",
+        "@closer": "example-team-b-closer"
       }
     },
     "responsePolicy": {

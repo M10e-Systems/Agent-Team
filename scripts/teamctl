@@ -72,8 +72,8 @@ usage:
   teamctl dashboard <agent-id>
 
 notes:
-  - team ids: example-team-a, example-team-b
-  - agent ids: example-team-a-facilitator, example-team-a-architect, example-team-a-growth, example-team-b-facilitator, example-team-b-editor, example-team-b-maker
+  - team ids depend on your generated runtime; use `teamctl list` to inspect them.
+  - agent ids depend on your generated runtime; use `teamctl list` and the team index to inspect them.
   - discord-* commands use the provider-selected runtime and do not require agent containers.
   - dashboard is informational in the current model; these instances do not run a long-lived gateway by default.
   - build uses OPENCLAW_REPO_PATH/OPENCLAW_DOCKERFILE and tags the image as OPENCLAW_IMAGE (defaults to openclaw:local).
@@ -190,7 +190,7 @@ case "$cmd" in
     need_runtime
     team="${2:-}"
     if [[ -z "$team" ]]; then
-      docker ps --format '{{.Names}}\t{{.Status}}' | rg "${AGENT_CONTAINER_PREFIX}-(example-team-a|example-team-b)" || true
+      docker ps --format '{{.Names}}\t{{.Status}}' | rg "^${AGENT_CONTAINER_PREFIX}-" || true
       exit 0
     fi
     if ! is_team "$team"; then
