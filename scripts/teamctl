@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/workspace/agent-team-tools"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$ROOT/runtime/docker-compose.generated.yml"
 INDEX_FILE="$ROOT/runtime/team-index.json"
+OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw:local}"
+OPENCLAW_REPO_PATH="${OPENCLAW_REPO_PATH:-$(cd "$ROOT/.." && pwd)/openclaw}"
+OPENCLAW_DOCKERFILE="${OPENCLAW_DOCKERFILE:-$OPENCLAW_REPO_PATH/Dockerfile}"
 
 need_runtime() {
   if [[ ! -f "$COMPOSE_FILE" || ! -f "$INDEX_FILE" ]]; then
@@ -46,6 +50,7 @@ show_usage() {
   cat <<'EOF'
 usage:
   teamctl init
+  teamctl build
   teamctl up [team-id]
   teamctl down [team-id]
   teamctl restart [team-id]
@@ -70,10 +75,38 @@ notes:
   - agent ids: example-team-a-facilitator, example-team-a-architect, example-team-a-growth, example-team-b-facilitator, example-team-b-editor, example-team-b-maker
   - discord-* commands use the provider-selected runtime and do not require OpenClaw containers.
   - dashboard is informational in the current model; these instances do not run a long-lived gateway by default.
+  - build uses OPENCLAW_REPO_PATH/OPENCLAW_DOCKERFILE and tags the image as OPENCLAW_IMAGE (defaults to openclaw:local).
 EOF
 }
 
+need_openclaw_build_inputs() {
+  if [[ ! -d "$OPENCLAW_REPO_PATH" ]]; then
+    echo "missing OpenClaw repo: $OPENCLAW_REPO_PATH" >&2
+    exit 1
+  fi
+  if [[ ! -f "$OPENCLAW_DOCKERFILE" ]]; then
+    echo "missing Dockerfile: $OPENCLAW_DOCKERFILE" >&2
+    exit 1
+  fi
+}
+
+build_openclaw_image() {
+  need_openclaw_build_inputs
+  docker build -t "$OPENCLAW_IMAGE" -f "$OPENCLAW_DOCKERFILE" "$OPENCLAW_REPO_PATH"
+}
+
+ensure_openclaw_image() {
+  if [[ "${TEAMCTL_BUILD_ALWAYS:-0}" == "1" ]]; then
+    build_openclaw_image
+    return
+  fi
+  if ! docker image inspect "$OPENCLAW_IMAGE" >/dev/null 2>&1; then
+    build_openclaw_image
+  fi
+}
+
 compose_up_all() {
+  ensure_openclaw_image
   docker compose -f "$COMPOSE_FILE" up -d
 }
 
@@ -83,6 +116,7 @@ compose_up_team() {
   while IFS= read -r agent; do
     services+=("$agent")
   done < <(team_agents "$team")
+  ensure_openclaw_image
   docker compose -f "$COMPOSE_FILE" up -d "${services[@]}"
 }
 
@@ -106,6 +140,9 @@ cmd="${1:-}"
 case "$cmd" in
   init)
     "$ROOT/scripts/instantiate-openclaw-teams.mjs"
+    ;;
+  build)
+    build_openclaw_image
     ;;
   up)
     need_runtime
@@ -182,7 +219,7 @@ case "$cmd" in
       echo "unknown agent: $agent" >&2
       exit 1
     fi
-    "$ROOT/scripts/openclaw-instance" "$agent" agent --local --agent main --message "$*"
+    OPENCLAW_INSTANCE_PROMPT_STYLE=direct "$ROOT/scripts/openclaw-instance" "$agent" agent --local --agent main --message "$*"
     ;;
   room)
     need_runtime

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INDEX_FILE="$ROOT/runtime/team-index.json"
+OPENCLAW_INSTANCE="$ROOT/scripts/openclaw-instance"
+
 if [[ $# -lt 1 ]]; then
   echo "usage: $0 <team-id> [heartbeat prompt]" >&2
   exit 1
@@ -16,9 +21,9 @@ facilitator="$(
     const team=idx.teams[teamId];
     if (!team) process.exit(2);
     process.stdout.write(team.facilitatorId);
-  ' /workspace/agent-team-tools/runtime/team-index.json "$team_id"
+  ' "$INDEX_FILE" "$team_id"
 )"
 
 prompt="${*:-Read HEARTBEAT.md if it exists (workspace context). Use workspace file /home/node/.openclaw/workspace/HEARTBEAT.md (exact case). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.}"
 
-exec /workspace/agent-team-tools/scripts/openclaw-instance "$facilitator" agent --local --agent main --message "$prompt" --timeout 180
+exec env OPENCLAW_INSTANCE_PROMPT_STYLE=passthrough "$OPENCLAW_INSTANCE" "$facilitator" agent --local --agent main --message "$prompt" --timeout 180

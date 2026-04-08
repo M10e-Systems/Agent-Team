@@ -2,15 +2,17 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-const TOOLS_ROOT = "/workspace/agent-team-tools";
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const TOOLS_ROOT = path.resolve(SCRIPT_DIR, "..");
 const REGISTRY_PATH = path.join(TOOLS_ROOT, "teams.json");
 const OUTPUT_DIR = path.join(TOOLS_ROOT, "runtime");
 const SOURCE_AUTH_PROFILES = "~/.openclaw/agents/main/agent/auth-profiles.json";
 const SOURCE_MODELS = "~/.openclaw/agents/main/agent/models.json";
 const SOURCE_CONFIG = "~/.openclaw/openclaw.json";
-const IMAGE = "openclaw:local";
+const IMAGE = process.env.OPENCLAW_IMAGE || "openclaw:local";
 
 const sourceConfig = JSON.parse(fs.readFileSync(SOURCE_CONFIG, "utf8"));
 const authProfilesJson = fs.readFileSync(SOURCE_AUTH_PROFILES, "utf8");

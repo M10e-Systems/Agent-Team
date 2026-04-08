@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INDEX_FILE="$ROOT/runtime/team-index.json"
+OPENCLAW_INSTANCE="$ROOT/scripts/openclaw-instance"
+
 if [[ $# -lt 2 ]]; then
   echo "usage: $0 <team-id> <prompt...>" >&2
   exit 1
@@ -20,7 +25,7 @@ mapfile -t team_info < <(
     for (const id of team.agentIds) {
       if (id !== team.facilitatorId) console.log(id);
     }
-  ' /workspace/agent-team-tools/runtime/team-index.json "$team_id"
+  ' "$INDEX_FILE" "$team_id"
 )
 
 facilitator="${team_info[0]}"
@@ -49,7 +54,7 @@ is_forced() {
 run_agent() {
   local instance="$1"
   local message="$2"
-  /workspace/agent-team-tools/scripts/openclaw-instance "$instance" agent --local --agent main --message "$message" --thinking "${OPENCLAW_DISCORD_THINKING:-off}" --timeout "${OPENCLAW_AGENT_TIMEOUT:-300}"
+  OPENCLAW_INSTANCE_PROMPT_STYLE=passthrough "$OPENCLAW_INSTANCE" "$instance" agent --local --agent main --message "$message" --thinking "${OPENCLAW_DISCORD_THINKING:-off}" --timeout "${OPENCLAW_AGENT_TIMEOUT:-300}"
 }
 
 transcript=$'USER: '"$prompt"

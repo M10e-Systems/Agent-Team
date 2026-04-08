@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import process from "node:process";
 import fs from "node:fs";
 
-const ROOT = "/workspace/agent-team-tools";
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(SCRIPT_DIR, "..");
 const INDEX_FILE = path.join(ROOT, "runtime", "team-index.json");
 const OPENCLAW_INSTANCE = path.join(ROOT, "scripts", "openclaw-instance");
 const ROOM_AGENT_TIMEOUT = process.env.OPENCLAW_ROOM_AGENT_TIMEOUT || "300";
@@ -35,7 +37,13 @@ function runAgent(instance, message) {
       "--timeout",
       ROOM_AGENT_TIMEOUT,
     ],
-    { cwd: ROOT, encoding: "utf8", maxBuffer: 1024 * 1024, timeout: ROOM_WALL_TIMEOUT, env: process.env }
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout: ROOM_WALL_TIMEOUT,
+      env: { ...process.env, OPENCLAW_INSTANCE_PROMPT_STYLE: "passthrough" },
+    }
   );
   const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   return lines.at(-1) ?? "";
