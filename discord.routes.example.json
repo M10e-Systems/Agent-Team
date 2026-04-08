@@ -65,6 +65,9 @@
       "progressNoticeRepeatMs": 60000,
       "processingTimeoutMs": 600000,
       "perTurnDelayMs": 500,
+      "agentThinking": "off",
+      "agentTimeoutSec": 45,
+      "agentWallTimeout": "90s",
       "presence": {
         "status": "online",
         "activityType": "watching",

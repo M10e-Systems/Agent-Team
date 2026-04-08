@@ -5,8 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$ROOT/runtime/docker-compose.generated.yml"
 INDEX_FILE="$ROOT/runtime/team-index.json"
+AGENT_CONTAINER_PREFIX="${AGENT_CONTAINER_PREFIX:-openclaw}"
 OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw:local}"
-OPENCLAW_REPO_PATH="${OPENCLAW_REPO_PATH:-$(cd "$ROOT/.." && pwd)/openclaw}"
+OPENCLAW_REPO_PATH="${OPENCLAW_REPO_PATH:-$ROOT/../openclaw}"
 OPENCLAW_DOCKERFILE="${OPENCLAW_DOCKERFILE:-$OPENCLAW_REPO_PATH/Dockerfile}"
 
 need_runtime() {
@@ -73,7 +74,7 @@ usage:
 notes:
   - team ids: example-team-a, example-team-b
   - agent ids: example-team-a-facilitator, example-team-a-architect, example-team-a-growth, example-team-b-facilitator, example-team-b-editor, example-team-b-maker
-  - discord-* commands use the provider-selected runtime and do not require OpenClaw containers.
+  - discord-* commands use the provider-selected runtime and do not require agent containers.
   - dashboard is informational in the current model; these instances do not run a long-lived gateway by default.
   - build uses OPENCLAW_REPO_PATH/OPENCLAW_DOCKERFILE and tags the image as OPENCLAW_IMAGE (defaults to openclaw:local).
 EOF
@@ -189,7 +190,7 @@ case "$cmd" in
     need_runtime
     team="${2:-}"
     if [[ -z "$team" ]]; then
-      docker ps --format '{{.Names}}\t{{.Status}}' | rg 'openclaw-(example-team-a|example-team-b)' || true
+      docker ps --format '{{.Names}}\t{{.Status}}' | rg "${AGENT_CONTAINER_PREFIX}-(example-team-a|example-team-b)" || true
       exit 0
     fi
     if ! is_team "$team"; then
@@ -219,7 +220,7 @@ case "$cmd" in
       echo "unknown agent: $agent" >&2
       exit 1
     fi
-    OPENCLAW_INSTANCE_PROMPT_STYLE=direct "$ROOT/scripts/openclaw-instance" "$agent" agent --local --agent main --message "$*"
+    AGENT_INSTANCE_PROMPT_STYLE=direct "$ROOT/scripts/agent-instance" "$agent" agent --local --agent main --message "$*"
     ;;
   room)
     need_runtime
@@ -297,7 +298,7 @@ case "$cmd" in
       echo "unknown agent: $agent" >&2
       exit 1
     fi
-    docker logs -f "openclaw-$agent"
+    docker logs -f "${AGENT_CONTAINER_PREFIX}-$agent"
     ;;
   shell)
     need_runtime
@@ -310,7 +311,7 @@ case "$cmd" in
       echo "unknown agent: $agent" >&2
       exit 1
     fi
-    exec docker exec -it "openclaw-$agent" sh
+    exec docker exec -it "${AGENT_CONTAINER_PREFIX}-$agent" sh
     ;;
   ps)
     need_runtime
@@ -324,7 +325,7 @@ case "$cmd" in
       exit 1
     fi
     while IFS= read -r agent; do
-      docker ps --filter "name=openclaw-$agent" --format '{{.Names}}\t{{.Status}}'
+      docker ps --filter "name=${AGENT_CONTAINER_PREFIX}-$agent" --format '{{.Names}}\t{{.Status}}'
     done < <(team_agents "$team")
     ;;
   path)
@@ -335,11 +336,13 @@ case "$cmd" in
       exit 1
     fi
     node -e '
-      const idx=require(process.argv[1]);
-      const entry=idx.agents[process.argv[2]];
+      const path=require("path");
+      const toolsRoot=process.argv[1];
+      const idx=require(process.argv[2]);
+      const entry=idx.agents[process.argv[3]];
       if (!entry) process.exit(2);
-      console.log(entry.runtimeStateDir);
-    ' "$INDEX_FILE" "$agent"
+      console.log(path.isAbsolute(entry.runtimeStateDir) ? entry.runtimeStateDir : path.resolve(toolsRoot, entry.runtimeStateDir));
+    ' "$ROOT" "$INDEX_FILE" "$agent"
     ;;
   dashboard)
     need_runtime
@@ -356,8 +359,8 @@ case "$cmd" in
 No dashboard URL is exposed for $agent in the current runtime model.
 
 This is intentional:
-- each container is an isolated OpenClaw home
-- turns run via 'docker exec ... openclaw agent --local ...'
+- each container is an isolated agent workspace
+- turns run via 'docker exec ... agent --local ...'
 - no long-lived per-container gateway is bound to a host port
 
 If you want dashboard access later, we can add an alternate gateway-backed mode for selected agents.

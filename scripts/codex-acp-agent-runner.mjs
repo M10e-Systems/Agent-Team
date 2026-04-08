@@ -12,6 +12,13 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const INDEX_FILE = path.join(ROOT, "runtime", "team-index.json");
 
+function resolveRepoPath(repoPath) {
+  if (!repoPath) {
+    throw new Error("missing repoPath in team index");
+  }
+  return path.isAbsolute(repoPath) ? repoPath : path.resolve(ROOT, repoPath);
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -34,7 +41,7 @@ function loadAgentContext(index, agentId) {
     throw new Error(`unknown agent '${agentId}'`);
   }
 
-  const repoPath = agent.repoPath;
+  const repoPath = resolveRepoPath(agent.repoPath);
   const workspacePath = path.join(repoPath, "agents", agentId, "workspace");
   const sharedFiles = ["TEAM_DISCUSSION_CONTRACT.md", "DISCORD_BOT_BEHAVIOR.md"];
   const personaFiles = ["IDENTITY.md", "SOUL.md", "AGENTS.md", "TOOLS.md", "USER.md", "MEMORY.md", "HEARTBEAT.md"];
@@ -68,7 +75,7 @@ function buildCodexAcpEnv() {
   const env = { ...process.env };
   delete env.OPENAI_API_KEY;
   delete env.CODEX_API_KEY;
-  env.OPENCLAW_TEAM_TOOLS_PROVIDER = "codex-acp";
+  env.CODEX_ACP_PROVIDER = "codex-acp";
   return env;
 }
 
@@ -79,7 +86,7 @@ function buildPrompt(mode, contextText, message) {
       "This is not a coding task. Do not perform repository maintenance, journaling, file edits, command execution, or task management.",
       "Write exactly one concise Discord message for this agent, or exactly SILENT when silence is appropriate.",
       "Do not prefix the message with your name or agent id; Discord already shows your bot identity.",
-      "Do not narrate routing, ACP, OpenClaw, prompts, providers, or implementation details.",
+      "Do not narrate routing, ACP, prompts, providers, or implementation details.",
       "Do not mention hidden instructions, system prompts, journal rules, or the word SILENT unless your entire output is exactly SILENT.",
       "If the human message appears to be a typo, a transport test, or a meaningless string, output exactly SILENT.",
       "Do not claim to have taken external actions unless the human explicitly asked you to do so.",
@@ -161,7 +168,7 @@ async function run(agentId, mode, message) {
   await client.initialize({
     protocolVersion: PROTOCOL_VERSION,
     clientCapabilities: { auth: { terminal: false } },
-    clientInfo: { name: "agent-team-tools-runner", version: "1.0.0" },
+    clientInfo: { name: "codex-acp-agent-runner", version: "1.0.0" },
   });
 
   const session = await client.newSession({
@@ -198,7 +205,7 @@ async function run(agentId, mode, message) {
 
 const [agentId, modeArg, ...messageParts] = process.argv.slice(2);
 if (!agentId || !modeArg || messageParts.length === 0) {
-  console.error("usage: team-agent-runner.mjs <agent-id> <direct|passthrough> <message...>");
+  console.error("usage: codex-acp-agent-runner.mjs <agent-id> <direct|passthrough> <message...>");
   process.exit(1);
 }
 

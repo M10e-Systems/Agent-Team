@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INDEX_FILE="$ROOT/runtime/team-index.json"
-OPENCLAW_INSTANCE="$ROOT/scripts/openclaw-instance"
+AGENT_INSTANCE="$ROOT/scripts/agent-instance"
 
 if [[ $# -lt 2 ]]; then
   echo "usage: $0 <team-id> <prompt...>" >&2
@@ -30,8 +30,8 @@ mapfile -t team_info < <(
 
 facilitator="${team_info[0]}"
 specialists=("${team_info[@]:1}")
-force_all="${OPENCLAW_FORCE_ALL_RESPONSES:-0}"
-force_agents_raw="${OPENCLAW_FORCE_AGENT_IDS:-}"
+force_all="${TEAM_AGENT_FORCE_ALL_RESPONSES:-0}"
+force_agents_raw="${TEAM_AGENT_FORCE_AGENT_IDS:-}"
 forced_agents=()
 if [[ -n "$force_agents_raw" ]]; then
   IFS=',' read -r -a forced_agents <<< "$force_agents_raw"
@@ -54,7 +54,7 @@ is_forced() {
 run_agent() {
   local instance="$1"
   local message="$2"
-  OPENCLAW_INSTANCE_PROMPT_STYLE=passthrough "$OPENCLAW_INSTANCE" "$instance" agent --local --agent main --message "$message" --thinking "${OPENCLAW_DISCORD_THINKING:-off}" --timeout "${OPENCLAW_AGENT_TIMEOUT:-300}"
+  AGENT_INSTANCE_PROMPT_STYLE=passthrough AGENT_WALL_TIMEOUT="${TEAM_AGENT_WALL_TIMEOUT:-}" "$AGENT_INSTANCE" "$instance" agent --local --agent main --message "$message" --thinking "${TEAM_AGENT_THINKING:-off}" --timeout "${TEAM_AGENT_TIMEOUT:-300}"
 }
 
 transcript=$'USER: '"$prompt"

@@ -2,11 +2,11 @@
   "teams": [
     {
       "teamId": "example-team-a",
-      "repoPath": "/workspace/agent-team-a"
+      "repoPath": "../agent-team-a"
     },
     {
       "teamId": "example-team-b",
-      "repoPath": "/workspace/agent-team-b"
+      "repoPath": "../agent-team-b"
     }
   ]
 }

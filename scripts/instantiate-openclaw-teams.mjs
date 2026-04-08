@@ -2,22 +2,37 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const TOOLS_ROOT = path.resolve(SCRIPT_DIR, "..");
-const REGISTRY_PATH = path.join(TOOLS_ROOT, "teams.json");
+const REGISTRY_PATH = fs.existsSync(path.join(TOOLS_ROOT, "teams.local.json"))
+  ? path.join(TOOLS_ROOT, "teams.local.json")
+  : path.join(TOOLS_ROOT, "teams.json");
 const OUTPUT_DIR = path.join(TOOLS_ROOT, "runtime");
-const SOURCE_AUTH_PROFILES = "~/.openclaw/agents/main/agent/auth-profiles.json";
-const SOURCE_MODELS = "~/.openclaw/agents/main/agent/models.json";
-const SOURCE_CONFIG = "~/.openclaw/openclaw.json";
+const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw");
+const SOURCE_AUTH_PROFILES = path.join(OPENCLAW_HOME, "agents/main/agent/auth-profiles.json");
+const SOURCE_MODELS = path.join(OPENCLAW_HOME, "agents/main/agent/models.json");
+const SOURCE_CONFIG = path.join(OPENCLAW_HOME, "openclaw.json");
 const IMAGE = process.env.OPENCLAW_IMAGE || "openclaw:local";
 
 const sourceConfig = JSON.parse(fs.readFileSync(SOURCE_CONFIG, "utf8"));
 const authProfilesJson = fs.readFileSync(SOURCE_AUTH_PROFILES, "utf8");
 const modelsJson = fs.readFileSync(SOURCE_MODELS, "utf8");
 const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, "utf8"));
+
+function resolveRepoPath(repoPath) {
+  if (!repoPath) {
+    throw new Error("missing repoPath in teams registry");
+  }
+  return path.isAbsolute(repoPath) ? repoPath : path.resolve(TOOLS_ROOT, repoPath);
+}
+
+function relativizeRepoPath(repoPath) {
+  return path.relative(TOOLS_ROOT, repoPath) || ".";
+}
 
 function mkdirp(target) {
   fs.mkdirSync(target, { recursive: true });
@@ -120,11 +135,11 @@ const composeLines = ["services:"];
 const teamIndex = { teams: {}, agents: {} };
 
 for (const teamEntry of registry.teams) {
-  const repoPath = teamEntry.repoPath;
+  const repoPath = resolveRepoPath(teamEntry.repoPath);
   const team = readJson(path.join(repoPath, "team.json"));
   const mounts = team.projectMounts ?? [];
   teamIndex.teams[team.teamId] = {
-    repoPath,
+    repoPath: relativizeRepoPath(repoPath),
     facilitatorId: team.facilitatorId,
     agentIds: team.agents.map((agent) => agent.id)
   };
@@ -162,18 +177,20 @@ for (const teamEntry of registry.teams) {
     composeLines.push(`    healthcheck:`);
     composeLines.push(`      test: ["CMD", "true"]`);
     composeLines.push(`    volumes:`);
-    composeLines.push(`      - ${stateDir}:/home/node/.openclaw`);
+    composeLines.push(`      - ${path.relative(OUTPUT_DIR, stateDir)}:/home/node/.openclaw`);
     for (const mount of mounts) {
+      const hostPath = mount.hostPath || (mount.hostPathEnv ? process.env[mount.hostPathEnv] : null);
+      if (!hostPath) continue;
       composeLines.push(
-        `      - ${mount.hostPath}:${mount.containerPath}${mount.mode ? `:${mount.mode}` : ""}`,
+        `      - ${hostPath}:${mount.containerPath}${mount.mode ? `:${mount.mode}` : ""}`,
       );
     }
 
     teamIndex.agents[agent.id] = {
       teamId: team.teamId,
-      repoPath,
+      repoPath: relativizeRepoPath(repoPath),
       containerName: `openclaw-${agent.id}`,
-      runtimeStateDir: stateDir,
+      runtimeStateDir: path.relative(TOOLS_ROOT, stateDir),
       isFacilitator: agent.id === team.facilitatorId
     };
   }

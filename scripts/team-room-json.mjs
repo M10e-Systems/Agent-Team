@@ -9,9 +9,9 @@ import fs from "node:fs";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const INDEX_FILE = path.join(ROOT, "runtime", "team-index.json");
-const OPENCLAW_INSTANCE = path.join(ROOT, "scripts", "openclaw-instance");
-const ROOM_AGENT_TIMEOUT = process.env.OPENCLAW_ROOM_AGENT_TIMEOUT || "300";
-const ROOM_WALL_TIMEOUT = Number(process.env.OPENCLAW_ROOM_WALL_TIMEOUT || 600000);
+const AGENT_INSTANCE = path.join(ROOT, "scripts", "agent-instance");
+const ROOM_AGENT_TIMEOUT = process.env.TEAM_AGENT_ROOM_TIMEOUT || "300";
+const ROOM_WALL_TIMEOUT = Number(process.env.TEAM_AGENT_ROOM_WALL_TIMEOUT || 600000);
 
 function usage() {
   console.error("usage: team-room-json.mjs <team-id> <prompt...>");
@@ -23,7 +23,7 @@ function loadIndex() {
 
 function runAgent(instance, message) {
   const output = execFileSync(
-    OPENCLAW_INSTANCE,
+    AGENT_INSTANCE,
     [
       instance,
       "agent",
@@ -33,7 +33,7 @@ function runAgent(instance, message) {
       "--message",
       message,
       "--thinking",
-      process.env.OPENCLAW_DISCORD_THINKING || "off",
+      process.env.TEAM_AGENT_THINKING || "off",
       "--timeout",
       ROOM_AGENT_TIMEOUT,
     ],
@@ -42,7 +42,7 @@ function runAgent(instance, message) {
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
       timeout: ROOM_WALL_TIMEOUT,
-      env: { ...process.env, OPENCLAW_INSTANCE_PROMPT_STYLE: "passthrough" },
+      env: { ...process.env, AGENT_INSTANCE_PROMPT_STYLE: "passthrough" },
     }
   );
   const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -70,9 +70,9 @@ if (!team) {
 const facilitator = team.facilitatorId;
 const specialists = team.agentIds.filter((agentId) => agentId !== facilitator);
 const turns = [];
-const forceAll = process.env.OPENCLAW_FORCE_ALL_RESPONSES === "1";
+const forceAll = process.env.TEAM_AGENT_FORCE_ALL_RESPONSES === "1";
 const forcedAgents = new Set(
-  String(process.env.OPENCLAW_FORCE_AGENT_IDS || "")
+  String(process.env.TEAM_AGENT_FORCE_AGENT_IDS || "")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean)

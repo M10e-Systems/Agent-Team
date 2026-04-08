@@ -1,4 +1,5 @@
 runtime/
 discord.routes.json
 .env
+teams.local.json
 node_modules/
