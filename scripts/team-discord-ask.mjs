@@ -8,8 +8,8 @@ import process from "node:process";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const AGENT_INSTANCE = path.join(ROOT, "scripts", "agent-instance");
-const DISCORD_AGENT_TIMEOUT = process.env.TEAM_AGENT_DISCORD_AGENT_TIMEOUT || "180";
-const DISCORD_WALL_TIMEOUT = Number(process.env.TEAM_AGENT_DISCORD_WALL_TIMEOUT || 300000);
+const DISCORD_AGENT_TIMEOUT = process.env.TEAM_AGENT_TIMEOUT || "180";
+const DISCORD_WALL_TIMEOUT = Number(process.env.TEAM_AGENT_TIMEOUT_MS || 300000);
 
 function usage() {
   console.error("usage: team-discord-ask.mjs <agent-id> <message...>");

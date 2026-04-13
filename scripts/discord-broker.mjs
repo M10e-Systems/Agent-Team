@@ -24,9 +24,9 @@ const ROOT = path.resolve(__dirname, "..");
 const INDEX_FILE = path.join(ROOT, "runtime", "team-index.json");
 const ENV_FILES = [
   path.join(ROOT, ".env"),
-  path.join(ROOT, ".env.sparkmill"),
 ];
 const PID_FILE = path.join(ROOT, "runtime", "discord-broker.pid");
+const TEAM_OPERATOR_DISCORD_RELATIVE_PATH = path.join("operator", "discord.json");
 
 function resolveRepoPath(repoPath) {
   if (!repoPath) {
@@ -64,14 +64,64 @@ function loadDotEnv() {
   }
 }
 
-function loadRoutes(routesFileArg) {
+function mergeDiscordConfig(baseConfig, index) {
+  const baseDiscord = baseConfig?.discord || {};
+  const merged = {
+    discord: {
+      responsePolicy: { ...(baseDiscord.responsePolicy || {}) },
+      bots: Array.isArray(baseDiscord.bots) ? [...baseDiscord.bots] : [],
+      channels: Array.isArray(baseDiscord.channels) ? [...baseDiscord.channels] : [],
+      aliases: { ...(baseDiscord.aliases || {}) },
+    },
+  };
+
+  if (baseDiscord.guildId) {
+    merged.discord.guildId = baseDiscord.guildId;
+  }
+
+  for (const [teamId, teamEntry] of Object.entries(index.teams || {})) {
+    const repoPath = resolveRepoPath(teamEntry.repoPath);
+    const operatorDiscordPath = path.join(repoPath, TEAM_OPERATOR_DISCORD_RELATIVE_PATH);
+    if (!fs.existsSync(operatorDiscordPath)) {
+      throw new Error(`missing team operator Discord config for '${teamId}': ${operatorDiscordPath}`);
+    }
+
+    const operatorConfig = readJson(operatorDiscordPath);
+    const teamDiscord = operatorConfig?.discord || {};
+    const teamGuildId =
+      typeof teamDiscord.guildId === "string" && teamDiscord.guildId.trim().length > 0
+        ? teamDiscord.guildId
+        : null;
+
+    for (const bot of teamDiscord.bots || []) {
+      merged.discord.bots.push(bot);
+    }
+
+    for (const channel of teamDiscord.channels || []) {
+      merged.discord.channels.push({
+        ...channel,
+        teamId: channel.teamId || teamId,
+        guildId: channel.guildId || teamGuildId || undefined,
+      });
+    }
+
+    if (teamDiscord.aliases && typeof teamDiscord.aliases === "object") {
+      merged.discord.aliases[teamId] = {
+        ...(merged.discord.aliases[teamId] || {}),
+        ...teamDiscord.aliases,
+      };
+    }
+  }
+
+  return merged;
+}
+
+function loadRoutes(routesFileArg, index) {
   const routesFile = path.resolve(routesFileArg || path.join(ROOT, "discord.routes.json"));
   if (!fs.existsSync(routesFile)) {
-    throw new Error(
-      `routes file not found: ${routesFile}\ncopy ${path.join(ROOT, "discord.routes.example.json")} to discord.routes.json and fill in real ids`
-    );
+    throw new Error(`routes file not found: ${routesFile}\nrestore discord.routes.json from source control`);
   }
-  return { routesFile, config: readJson(routesFile) };
+  return { routesFile, config: mergeDiscordConfig(readJson(routesFile), index) };
 }
 
 function loadIndex() {
@@ -1177,9 +1227,9 @@ async function handleIncomingMessage({ bot, client, message, config, index, clie
 async function runBroker(routesFileArg) {
   loadDotEnv();
   ensureSingleBrokerInstance();
-  const { routesFile, config } = loadRoutes(routesFileArg);
-  globalThis.__discordBrokerConfig = config;
   const index = loadIndex();
+  const { routesFile, config } = loadRoutes(routesFileArg, index);
+  globalThis.__discordBrokerConfig = config;
   const errors = validateConfig(config, index);
   if (errors.length > 0) {
     throw new Error(`invalid Discord routes config:\n- ${errors.join("\n- ")}`);
@@ -1257,9 +1307,9 @@ async function runBroker(routesFileArg) {
 
 async function runInject(routesFileArg, channelOrTeamId, messageText) {
   loadDotEnv();
-  const { routesFile, config } = loadRoutes(routesFileArg);
-  globalThis.__discordBrokerConfig = config;
   const index = loadIndex();
+  const { routesFile, config } = loadRoutes(routesFileArg, index);
+  globalThis.__discordBrokerConfig = config;
   const errors = validateConfig(config, index);
   if (errors.length > 0) {
     throw new Error(`invalid Discord routes config:\n- ${errors.join("\n- ")}`);
@@ -1381,8 +1431,8 @@ async function runInject(routesFileArg, channelOrTeamId, messageText) {
 
 function runValidate(routesFileArg) {
   loadDotEnv();
-  const { routesFile, config } = loadRoutes(routesFileArg);
   const index = loadIndex();
+  const { routesFile, config } = loadRoutes(routesFileArg, index);
   const errors = validateConfig(config, index);
   if (errors.length > 0) {
     console.error(`invalid: ${routesFile}`);
@@ -1410,9 +1460,9 @@ function runValidate(routesFileArg) {
 
 function runProviderDoctor(routesFileArg) {
   loadDotEnv();
-  const { routesFile, config } = loadRoutes(routesFileArg);
-  globalThis.__discordBrokerConfig = config;
   const index = loadIndex();
+  const { routesFile, config } = loadRoutes(routesFileArg, index);
+  globalThis.__discordBrokerConfig = config;
   const errors = validateConfig(config, index);
   if (errors.length > 0) {
     throw new Error(`invalid Discord routes config:\n- ${errors.join("\n- ")}`);

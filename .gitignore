@@ -1,5 +1,5 @@
 runtime/
-discord.routes.json
 .env
-teams.local.json
+.env.sparkmill
+.history/
 node_modules/

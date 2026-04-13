@@ -4,6 +4,8 @@
   "type": "module",
   "description": "Tools for building and operating provider-backed agent teams.",
   "scripts": {
+    "init": "node ./scripts/instantiate-openclaw-teams.mjs",
+    "test": "node ./scripts/validate-config.mjs",
     "discord:validate": "node ./scripts/discord-broker.mjs validate ./discord.routes.json",
     "discord:run": "node ./scripts/discord-broker.mjs run ./discord.routes.json"
   },

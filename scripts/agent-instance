@@ -17,8 +17,8 @@ container="${container_prefix}-${instance}"
 run_id="agent-cli-$$-$RANDOM"
 outfile="/tmp/${run_id}.out"
 statusfile="/tmp/${run_id}.status"
-wall_timeout="${AGENT_WALL_TIMEOUT:-${OPENCLAW_WALL_TIMEOUT:-}}"
-prompt_style="${AGENT_INSTANCE_PROMPT_STYLE:-${OPENCLAW_INSTANCE_PROMPT_STYLE:-passthrough}}"
+wall_timeout="${AGENT_WALL_TIMEOUT:-}"
+prompt_style="${AGENT_INSTANCE_PROMPT_STYLE:-passthrough}"
 
 container_has_legacy_cli() {
   docker exec "$container" sh -lc 'command -v openclaw >/dev/null 2>&1'

@@ -5,30 +5,26 @@ import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { loadRegisteredTeams } from "./lib/team-registry.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const TOOLS_ROOT = path.resolve(SCRIPT_DIR, "..");
-const REGISTRY_PATH = fs.existsSync(path.join(TOOLS_ROOT, "teams.local.json"))
-  ? path.join(TOOLS_ROOT, "teams.local.json")
-  : path.join(TOOLS_ROOT, "teams.json");
+const CONFIG_DIR = path.join(TOOLS_ROOT, "config");
 const OUTPUT_DIR = path.join(TOOLS_ROOT, "runtime");
+const GENERATED_STATE_DIR = path.join(OUTPUT_DIR, "teams");
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw");
 const SOURCE_AUTH_PROFILES = path.join(OPENCLAW_HOME, "agents/main/agent/auth-profiles.json");
-const SOURCE_MODELS = path.join(OPENCLAW_HOME, "agents/main/agent/models.json");
-const SOURCE_CONFIG = path.join(OPENCLAW_HOME, "openclaw.json");
+const EMPTY_AUTH_PROFILES = path.join(CONFIG_DIR, "auth-profiles.empty.json");
+const SOURCE_MODELS = path.join(CONFIG_DIR, "models.json");
+const SOURCE_CONFIG = path.join(CONFIG_DIR, "runtime-defaults.json");
 const IMAGE = process.env.OPENCLAW_IMAGE || "openclaw:local";
 
 const sourceConfig = JSON.parse(fs.readFileSync(SOURCE_CONFIG, "utf8"));
-const authProfilesJson = fs.readFileSync(SOURCE_AUTH_PROFILES, "utf8");
+const authProfilesJson = fs.existsSync(SOURCE_AUTH_PROFILES)
+  ? fs.readFileSync(SOURCE_AUTH_PROFILES, "utf8")
+  : fs.readFileSync(EMPTY_AUTH_PROFILES, "utf8");
 const modelsJson = fs.readFileSync(SOURCE_MODELS, "utf8");
-const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, "utf8"));
-
-function resolveRepoPath(repoPath) {
-  if (!repoPath) {
-    throw new Error("missing repoPath in teams registry");
-  }
-  return path.isAbsolute(repoPath) ? repoPath : path.resolve(TOOLS_ROOT, repoPath);
-}
+const registry = loadRegisteredTeams(TOOLS_ROOT);
 
 function relativizeRepoPath(repoPath) {
   return path.relative(TOOLS_ROOT, repoPath) || ".";
@@ -48,95 +44,19 @@ function readJson(target) {
 }
 
 function buildOpenClawConfig() {
-  return {
-    agents: {
-      defaults: {
-        workspace: "/home/node/.openclaw/workspace",
-        models: sourceConfig.agents?.defaults?.models ?? {
-          "openai-codex/gpt-5.4": {},
-          "openai-codex/gpt-5.1-codex-mini": {}
-        },
-        model: {
-          primary: "openai-codex/gpt-5.1-codex-mini"
-        },
-        sandbox: {
-          mode: "non-main",
-          scope: "agent",
-          workspaceAccess: "none"
-        }
-      }
-    },
-    gateway: {
-      mode: "local",
-      auth: {
-        mode: "token",
-        token: crypto.randomBytes(24).toString("hex")
-      },
-      port: 18789,
-      bind: "loopback",
-      tailscale: {
-        mode: "off",
-        resetOnExit: false
-      },
-      nodes: {
-        denyCommands: [
-          "camera.snap",
-          "camera.clip",
-          "screen.record",
-          "contacts.add",
-          "calendar.add",
-          "reminders.add",
-          "sms.send",
-          "sms.search"
-        ]
-      }
-    },
-    session: {
-      dmScope: "per-channel-peer"
-    },
-    tools: {
-      profile: "coding",
-      web: {
-        search: {
-          provider: "duckduckgo",
-          enabled: true
-        }
-      }
-    },
-    auth: {
-      profiles: sourceConfig.auth?.profiles ?? {}
-    },
-    plugins: {
-      entries: {
-        duckduckgo: {
-          enabled: true
-        }
-      }
-    },
-    skills: {
-      install: {
-        nodeManager: "npm"
-      }
-    },
-    hooks: {
-      internal: {
-        enabled: true,
-        entries: {
-          "session-memory": {
-            enabled: true
-          }
-        }
-      }
-    }
-  };
+  const config = JSON.parse(JSON.stringify(sourceConfig));
+  config.gateway.auth.token = crypto.randomBytes(24).toString("hex");
+  return config;
 }
 
 const composeLines = ["services:"];
 const teamIndex = { teams: {}, agents: {} };
 
-for (const teamEntry of registry.teams) {
-  const repoPath = resolveRepoPath(teamEntry.repoPath);
-  const team = readJson(path.join(repoPath, "team.json"));
+fs.rmSync(GENERATED_STATE_DIR, { recursive: true, force: true });
+
+for (const teamEntry of registry) {
+  const repoPath = teamEntry.repoPath;
+  const team = teamEntry.team;
   const mounts = team.projectMounts ?? [];
   teamIndex.teams[team.teamId] = {
     repoPath: relativizeRepoPath(repoPath),
@@ -145,7 +65,7 @@ for (const teamEntry of registry.teams) {
   };
 
   for (const agent of team.agents) {
-    const stateDir = path.join(repoPath, "runtime", agent.id, "state");
+    const stateDir = path.join(GENERATED_STATE_DIR, team.teamId, agent.id);
     const workspaceDir = path.join(stateDir, "workspace");
     const mainAgentDir = path.join(stateDir, "agents", "main", "agent");
     const checkedInWorkspaceDir = path.join(repoPath, "agents", agent.id, "workspace");

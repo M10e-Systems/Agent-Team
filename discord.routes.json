@@ -1,0 +1,15 @@
+{
+  "discord": {
+    "responsePolicy": {
+      "ignoreUnknownChannels": true,
+      "ignoreBotMessages": true,
+      "reactWhileProcessing": true,
+      "typingWhileProcessing": true,
+      "progressNotices": false,
+      "processingTimeoutMs": 120000,
+      "agentTimeoutSec": 30,
+      "agentWallTimeout": "60s",
+      "perTurnDelayMs": 350
+    }
+  }
+}

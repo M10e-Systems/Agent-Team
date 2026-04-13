@@ -31,8 +31,8 @@ The team repos define identity, memory, and shared contracts.
 
 This tools repo:
 
-- reads the registry in `teams.json`
-- generates or resolves runtime state when needed
+- discovers team repos from `config/team-discovery.json` and `operator/team-tools.json`
+- generates runtime artifacts under `runtime/` when needed
 - routes turns through the selected provider
 - surfaces the team through Discord or direct local commands
 
@@ -46,18 +46,14 @@ Discord is one surface for operating agent teams, not the definition of the team
    npm install
    ```
 
-2. Prepare a team registry in `teams.json`.
+2. Review team discovery in `config/team-discovery.json`.
 
-3. Generate the runtime index and other derived files:
+3. Fill in local secrets in `.env` from `.env.example`.
+
+4. Generate the runtime index and other derived files:
 
    ```bash
    ./scripts/teamctl init
-   ```
-
-4. Create local Discord routing from the public example:
-
-   ```bash
-   ./scripts/teamctl discord-init
    ```
 
 5. Validate the routing and provider setup:
@@ -70,7 +66,7 @@ Discord is one surface for operating agent teams, not the definition of the team
 6. Run a local broker test:
 
    ```bash
-   ./scripts/teamctl discord-inject example-team-a "We need one concrete next move this week."
+   ./scripts/teamctl discord-inject m10e "We need one concrete next move this week."
    ```
 
 7. Start the Discord broker:
@@ -93,6 +89,13 @@ Discord is one surface for operating agent teams, not the definition of the team
 - [Productivity field guide](docs/productivity-field-guide.md)
 - [Reference](docs/reference.md)
 
-## Legacy Note
+## Config Layout
 
-Some script names, runtime paths, and fallback provider helpers still contain `OpenClaw` because the repository started there. That name now describes legacy implementation details, not the product identity.
+- `config/team-discovery.json` defines discovery roots and optional explicit repo paths
+- `discord.routes.json` is the source-controlled engine-wide Discord defaults file
+- `.env.example` documents required secrets
+- `.env` holds local secrets only
+- `config/` contains source-controlled runtime defaults for generated artifacts
+- `runtime/` is generated working state and stays out of version control
+- each team repo self-registers with `operator/team-tools.json`
+- each team repo owns its Discord routing fragment in `operator/discord.json`

@@ -11,6 +11,7 @@ AGENT_CONTAINER_PREFIX="${AGENT_CONTAINER_PREFIX:-openclaw}"
 OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw:local}"
 OPENCLAW_REPO_PATH="${OPENCLAW_REPO_PATH:-$ROOT/../openclaw}"
 OPENCLAW_DOCKERFILE="${OPENCLAW_DOCKERFILE:-$OPENCLAW_REPO_PATH/Dockerfile}"
+ROUTES_FILE_DEFAULT="$ROOT/discord.routes.json"
 
 need_runtime() {
   if [[ ! -f "$COMPOSE_FILE" || ! -f "$INDEX_FILE" ]]; then
@@ -62,7 +63,6 @@ usage:
   teamctl ask <agent-id> <message...>
   teamctl room <team-id> <message...>
   teamctl heartbeat <team-id> [prompt...]
-  teamctl discord-init
   teamctl discord-validate [routes-file]
   teamctl discord-run [routes-file]
   teamctl discord-start [routes-file]
@@ -83,6 +83,7 @@ notes:
   - discord-run is foreground; use discord-start/discord-stop/discord-status for managed background operation.
   - dashboard is informational in the current model; these instances do not run a long-lived gateway by default.
   - build uses OPENCLAW_REPO_PATH/OPENCLAW_DOCKERFILE and tags the image as OPENCLAW_IMAGE (defaults to openclaw:local).
+  - discord routes now live in the tracked file `discord.routes.json`; keep secrets in `.env`.
 EOF
 }
 
@@ -368,31 +369,19 @@ case "$cmd" in
     fi
     "$ROOT/scripts/team-heartbeat" "$team" "$@"
     ;;
-  discord-init)
-    target="$ROOT/discord.routes.json"
-    if [[ -f "$target" ]]; then
-      echo "already exists: $target"
-      exit 0
-    fi
-    cp "$ROOT/discord.routes.example.json" "$target"
-    echo "created: $target"
-    echo "next: fill in your real Discord guild/channel ids, then export DISCORD_BOT_TOKEN and run:"
-    echo "  $ROOT/scripts/teamctl discord-validate"
-    echo "  $ROOT/scripts/teamctl discord-run"
-    ;;
   discord-validate)
     need_index
-    routes_file="${2:-$ROOT/discord.routes.json}"
+    routes_file="${2:-$ROUTES_FILE_DEFAULT}"
     node "$ROOT/scripts/discord-broker.mjs" validate "$routes_file"
     ;;
   discord-run)
     need_index
-    routes_file="${2:-$ROOT/discord.routes.json}"
+    routes_file="${2:-$ROUTES_FILE_DEFAULT}"
     node "$ROOT/scripts/discord-broker.mjs" run "$routes_file"
     ;;
   discord-start)
     need_index
-    routes_file="${2:-$ROOT/discord.routes.json}"
+    routes_file="${2:-$ROUTES_FILE_DEFAULT}"
     discord_start "$routes_file"
     ;;
   discord-stop)
@@ -409,11 +398,11 @@ case "$cmd" in
       show_usage
       exit 1
     fi
-    node "$ROOT/scripts/discord-broker.mjs" inject "$ROOT/discord.routes.json" "$target" "$*"
+    node "$ROOT/scripts/discord-broker.mjs" inject "$ROUTES_FILE_DEFAULT" "$target" "$*"
     ;;
   discord-provider-doctor)
     need_index
-    routes_file="${2:-$ROOT/discord.routes.json}"
+    routes_file="${2:-$ROUTES_FILE_DEFAULT}"
     node "$ROOT/scripts/discord-broker.mjs" provider-doctor "$routes_file"
     ;;
   logs)

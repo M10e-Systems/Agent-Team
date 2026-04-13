@@ -10,8 +10,8 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const INDEX_FILE = path.join(ROOT, "runtime", "team-index.json");
 const AGENT_INSTANCE = path.join(ROOT, "scripts", "agent-instance");
-const ROOM_AGENT_TIMEOUT = process.env.TEAM_AGENT_ROOM_TIMEOUT || "300";
-const ROOM_WALL_TIMEOUT = Number(process.env.TEAM_AGENT_ROOM_WALL_TIMEOUT || 600000);
+const ROOM_AGENT_TIMEOUT = process.env.TEAM_AGENT_TIMEOUT || "300";
+const ROOM_WALL_TIMEOUT = Number(process.env.TEAM_AGENT_TIMEOUT_MS || 600000);
 
 function usage() {
   console.error("usage: team-room-json.mjs <team-id> <prompt...>");
