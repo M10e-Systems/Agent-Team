@@ -41,10 +41,14 @@ For Discord, start from `discord.routes.example.json` and write a local `discord
 
 The example file documents:
 
+- a default guild id plus optional per-channel guild overrides
 - bot identities
 - channel mappings
 - aliases
 - response policy
+
+Use the top-level `discord.guildId` when most routes live in one server.
+Add `guildId` on individual channel entries when a team should live in a different Discord server.
 
 Private Discord tokens belong in `.env`, not in the public example file.
 
@@ -53,7 +57,7 @@ The current response-policy knobs are especially useful:
 - `reactWhileProcessing`: acknowledge the ingress immediately
 - `typingWhileProcessing`: show `is typing...` while work is active
 - `typingRefreshMs`: refresh interval for typing state
-- `progressNotices`: emit a visible progress message during long turns
+- `progressNotices`: emit a visible progress message during unusually long turns
 - `progressNoticeAfterMs`: delay before the first progress notice
 - `progressNoticeRepeatMs`: repeat interval for later progress notices
 - `processingTimeoutMs`: fail gracefully if the turn runs too long

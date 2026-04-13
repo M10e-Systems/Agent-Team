@@ -37,6 +37,8 @@ Important fields:
 - `discord.aliases`
 - `discord.responsePolicy`
 
+`discord.guildId` is now a default guild id. Individual `discord.channels[]` entries may also define `guildId` to route a team through a different Discord server while sharing the same broker config.
+
 The example uses `agentProvider: "codex-acp"` in its response policy.
 
 ## Provider Environment Variables

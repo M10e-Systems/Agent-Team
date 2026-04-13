@@ -1,6 +1,6 @@
 {
   "discord": {
-    "guildId": "YOUR_DISCORD_SERVER_ID",
+    "guildId": "YOUR_DEFAULT_DISCORD_SERVER_ID",
     "bots": [
       {
         "agentId": "example-team-a-facilitator",
@@ -35,6 +35,7 @@
         "ingressAgentId": "example-team-a-facilitator"
       },
       {
+        "guildId": "YOUR_TEAM_B_DISCORD_SERVER_ID",
         "channelId": "YOUR_TEAM_B_CHANNEL_ID",
         "teamId": "example-team-b",
         "mode": "meeting-room",

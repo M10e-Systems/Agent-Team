@@ -22,7 +22,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, "..");
 const INDEX_FILE = path.join(ROOT, "runtime", "team-index.json");
-const ENV_FILE = path.join(ROOT, ".env");
+const ENV_FILES = [
+  path.join(ROOT, ".env"),
+  path.join(ROOT, ".env.sparkmill"),
+];
 const PID_FILE = path.join(ROOT, "runtime", "discord-broker.pid");
 
 function resolveRepoPath(repoPath) {
@@ -45,17 +48,19 @@ function readJson(filePath) {
 }
 
 function loadDotEnv() {
-  if (!fs.existsSync(ENV_FILE)) return;
-  const lines = fs.readFileSync(ENV_FILE, "utf8").split(/\r?\n/);
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const idx = line.indexOf("=");
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1);
-    if (!key || process.env[key] !== undefined) continue;
-    process.env[key] = value;
+  for (const envFile of ENV_FILES) {
+    if (!fs.existsSync(envFile)) continue;
+    const lines = fs.readFileSync(envFile, "utf8").split(/\r?\n/);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const idx = line.indexOf("=");
+      if (idx === -1) continue;
+      const key = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1);
+      if (!key || process.env[key] !== undefined) continue;
+      process.env[key] = value;
+    }
   }
 }
 
@@ -139,8 +144,9 @@ function validateConfig(config, index) {
     errors.push("missing top-level discord object");
     return errors;
   }
-  if (!discord.guildId || typeof discord.guildId !== "string") {
-    errors.push("discord.guildId must be a string");
+  const hasTopLevelGuildId = typeof discord.guildId === "string" && discord.guildId.trim().length > 0;
+  if (discord.guildId !== undefined && typeof discord.guildId !== "string") {
+    errors.push("discord.guildId must be a string when provided");
   }
   if (!Array.isArray(discord.bots) || discord.bots.length === 0) {
     errors.push("discord.bots must be a non-empty array");
@@ -163,8 +169,15 @@ function validateConfig(config, index) {
     errors.push("discord.channels must be a non-empty array");
   } else {
     for (const [idx, entry] of discord.channels.entries()) {
+      const hasRouteGuildId = typeof entry.guildId === "string" && entry.guildId.trim().length > 0;
       if (!entry.channelId || typeof entry.channelId !== "string") {
         errors.push(`discord.channels[${idx}].channelId must be a string`);
+      }
+      if (entry.guildId !== undefined && typeof entry.guildId !== "string") {
+        errors.push(`discord.channels[${idx}].guildId must be a string when provided`);
+      }
+      if (!hasTopLevelGuildId && !hasRouteGuildId) {
+        errors.push(`discord.channels[${idx}] must define guildId when top-level discord.guildId is omitted`);
       }
       if (!entry.teamId || !index.teams?.[entry.teamId]) {
         errors.push(`discord.channels[${idx}].teamId must reference a known team`);
@@ -195,12 +208,24 @@ function validateConfig(config, index) {
   return errors;
 }
 
-function resolveTeamChannel(config, channelId) {
-  return (config.discord.channels || []).find((entry) => entry.channelId === channelId) || null;
+function resolveRouteGuildId(config, route) {
+  if (route?.guildId) return route.guildId;
+  if (config?.discord?.guildId) return config.discord.guildId;
+  return null;
+}
+
+function resolveTeamChannel(config, guildId, channelId) {
+  return (
+    (config.discord.channels || []).find((entry) => {
+      if (entry.channelId !== channelId) return false;
+      const routeGuildId = resolveRouteGuildId(config, entry);
+      return !routeGuildId || routeGuildId === guildId;
+    }) || null
+  );
 }
 
 function resolveRouteForInject(config, index, target) {
-  const byChannel = resolveTeamChannel(config, target);
+  const byChannel = (config.discord.channels || []).find((entry) => entry.channelId === target) || null;
   if (byChannel) return byChannel;
   if (index.teams?.[target]) {
     return (config.discord.channels || []).find((entry) => entry.teamId === target) || null;
@@ -781,22 +806,34 @@ async function runStreamingRoom(clientsByAgentId, channelId, teamId, prompt, per
   });
 }
 
-function resolveAliasMention(config, teamId, messageText) {
-  const aliases = config.discord.aliases?.[teamId] || {};
-  const haystack = normalizeText(messageText);
-  for (const [alias, agentId] of Object.entries(aliases)) {
-    if (haystack.includes(normalizeText(alias))) {
-      return agentId;
+function collectTeamTextAliases(config, teamId, clientsByAgentId, index) {
+  const aliases = new Map();
+
+  for (const [alias, agentId] of Object.entries(config.discord.aliases?.[teamId] || {})) {
+    aliases.set(alias, agentId);
+  }
+
+  for (const agentId of index.teams?.[teamId]?.agentIds || []) {
+    const client = clientsByAgentId?.get?.(agentId);
+    const username = client?.user?.username?.trim?.();
+    const globalName = client?.user?.globalName?.trim?.();
+
+    if (username) {
+      aliases.set(`@${username}`, agentId);
+    }
+    if (globalName) {
+      aliases.set(`@${globalName}`, agentId);
     }
   }
-  return null;
+
+  return aliases;
 }
 
-function resolveAliasMentions(config, teamId, messageText) {
-  const aliases = config.discord.aliases?.[teamId] || {};
+function resolveAliasMentions(config, teamId, messageText, clientsByAgentId, index) {
+  const aliases = collectTeamTextAliases(config, teamId, clientsByAgentId, index);
   const haystack = normalizeText(messageText);
   const matches = [];
-  for (const [alias, agentId] of Object.entries(aliases)) {
+  for (const [alias, agentId] of aliases.entries()) {
     if (haystack.includes(normalizeText(alias))) {
       matches.push(agentId);
     }
@@ -829,7 +866,7 @@ function getMentionedTeamAgentIds(message, teamId, botUserIdToAgentId, index) {
   return [...new Set(mentionedAgentIds)];
 }
 
-function getForcedAgentIdsFromRoute(config, route, index, message, botUserIdToAgentId, text) {
+function getForcedAgentIdsFromRoute(config, route, index, message, botUserIdToAgentId, text, clientsByAgentId) {
   const normalized = normalizeText(text);
   if (normalized.includes("@everyone") || normalized.includes("@here") || Boolean(message?.mentions?.everyone)) {
     return [...index.teams[route.teamId].agentIds];
@@ -837,7 +874,7 @@ function getForcedAgentIdsFromRoute(config, route, index, message, botUserIdToAg
   return [
     ...new Set([
       ...getMentionedTeamAgentIds(message, route.teamId, botUserIdToAgentId, index),
-      ...resolveAliasMentions(config, route.teamId, text),
+      ...resolveAliasMentions(config, route.teamId, text, clientsByAgentId, index),
     ]),
   ];
 }
@@ -917,11 +954,20 @@ async function startProgressNoticeLoop(client, channelId, enabled, firstNoticeMs
   let stopped = false;
   let firstTimer = null;
   let repeatTimer = null;
+  const startedAt = Date.now();
+
+  function formatElapsed(ms) {
+    const totalMinutes = Math.max(1, Math.round(ms / 60000));
+    return `${totalMinutes} minute${totalMinutes === 1 ? "" : "s"}`;
+  }
 
   const sendNotice = async () => {
     if (stopped) return;
     try {
-      await channel.send("Still working on this one. No hang yet, just taking a bit longer.");
+      const elapsed = formatElapsed(Date.now() - startedAt);
+      await channel.send(
+        `Still waiting on a response in this thread after ${elapsed}. No timeout yet, just an unusually long round.`,
+      );
     } catch {
       // ignore
     }
@@ -995,11 +1041,11 @@ async function safeSendSingleReply(clientsByAgentId, channelId, agentId, text, c
 }
 
 async function handleIncomingMessage({ bot, client, message, config, index, clientsByAgentId, botUserIdToAgentId, activeChannels }) {
-  const route = resolveTeamChannel(config, message.channelId);
+  const route = resolveTeamChannel(config, message.guildId, message.channelId);
   if (message.author.bot && config.discord.responsePolicy?.ignoreBotMessages !== false) {
     return;
   }
-  if (!message.guildId || message.guildId !== config.discord.guildId) return;
+  if (!message.guildId) return;
   if (!route) {
     if (config.discord.responsePolicy?.ignoreUnknownChannels) return;
     return;
@@ -1011,7 +1057,7 @@ async function handleIncomingMessage({ bot, client, message, config, index, clie
   }
 
   const text = message.content?.trim() || "";
-  const forcedAgentIds = getForcedAgentIdsFromRoute(config, route, index, message, botUserIdToAgentId, text);
+  const forcedAgentIds = getForcedAgentIdsFromRoute(config, route, index, message, botUserIdToAgentId, text, clientsByAgentId);
   if (!text) {
     if (
       forcedAgentIds.length > 0
@@ -1033,7 +1079,7 @@ async function handleIncomingMessage({ bot, client, message, config, index, clie
       clientsByAgentId,
       message.channelId,
       ingressAgentId,
-      "Still working on the previous prompt. I’m keeping the busy signal on and will post when this round finishes.",
+      "Still waiting on the previous prompt to finish. I’m not starting a second round yet.",
       "busy message",
     );
     return;
@@ -1232,7 +1278,7 @@ async function runInject(routesFileArg, channelOrTeamId, messageText) {
   }
 
   const ingressAgentId = route.ingressAgentId || index.teams[route.teamId].facilitatorId;
-  const forcedAgentIds = getForcedAgentIdsFromRoute(config, route, index, null, new Map(), messageText);
+  const forcedAgentIds = getForcedAgentIdsFromRoute(config, route, index, null, new Map(), messageText, null);
   const mentionedAgentId = forcedAgentIds.length === 1 ? forcedAgentIds[0] : null;
   const processingTimeoutMs = resolveProcessingTimeoutMs(config, 120000);
   const provider = resolveAgentProvider(config);
@@ -1347,10 +1393,15 @@ function runValidate(routesFileArg) {
   }
 
   console.log(`valid: ${routesFile}`);
-  console.log(`guild: ${config.discord.guildId}`);
+  if (config.discord.guildId) {
+    console.log(`default guild: ${config.discord.guildId}`);
+  } else {
+    console.log("default guild: (none; every route must define guildId)");
+  }
   for (const entry of config.discord.channels) {
     const ingressAgentId = entry.ingressAgentId || index.teams[entry.teamId].facilitatorId;
-    console.log(`channel ${entry.channelId} -> team ${entry.teamId} via ingress ${ingressAgentId}`);
+    const guildId = resolveRouteGuildId(config, entry) || "(missing)";
+    console.log(`guild ${guildId} channel ${entry.channelId} -> team ${entry.teamId} via ingress ${ingressAgentId}`);
   }
   for (const bot of config.discord.bots) {
     console.log(`bot ${bot.agentId} uses env ${bot.tokenEnvVar}`);
