@@ -72,7 +72,7 @@ function resolveCodexAcpCommand() {
 }
 
 function resolveCodexAcpBaseModel() {
-  return String(process.env.TEAM_CODEX_ACP_MODEL || "gpt-5.4").trim();
+  return String(process.env.TEAM_CODEX_ACP_MODEL || "gpt-5.4-mini").trim();
 }
 
 function resolveCodexAcpReasoningEffort() {

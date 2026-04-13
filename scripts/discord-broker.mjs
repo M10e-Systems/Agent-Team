@@ -301,7 +301,7 @@ function buildAgentDiscordEnv(config) {
       policy.agentWallTimeout || process.env.TEAM_AGENT_WALL_TIMEOUT || "90s",
     ),
     TEAM_CODEX_ACP_MODEL: String(
-      policy.codexAcpModel || process.env.TEAM_CODEX_ACP_MODEL || "gpt-5.4",
+      policy.codexAcpModel || process.env.TEAM_CODEX_ACP_MODEL || "gpt-5.4-mini",
     ),
     TEAM_CODEX_ACP_REASONING_EFFORT: String(
       policy.agentReasoningEffort || process.env.TEAM_CODEX_ACP_REASONING_EFFORT || "medium",
@@ -419,7 +419,7 @@ function resolveCodexAcpBaseModel(config = globalThis.__discordBrokerConfig) {
   return String(
     process.env.TEAM_CODEX_ACP_MODEL ||
       config?.discord?.responsePolicy?.codexAcpModel ||
-      "gpt-5.4",
+      "gpt-5.4-mini",
   ).trim();
 }
 
