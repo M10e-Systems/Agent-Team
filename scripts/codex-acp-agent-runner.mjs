@@ -71,6 +71,28 @@ function resolveCodexAcpCommand() {
   return process.env.TEAM_CODEX_ACP_COMMAND || path.join(ROOT, "node_modules", ".bin", "codex-acp");
 }
 
+function resolveCodexAcpBaseModel() {
+  return String(process.env.TEAM_CODEX_ACP_MODEL || "gpt-5.4").trim();
+}
+
+function resolveCodexAcpReasoningEffort() {
+  return String(process.env.TEAM_CODEX_ACP_REASONING_EFFORT || "medium").trim();
+}
+
+function resolveCodexAcpModelId(sessionInfo, baseModel, reasoningEffort) {
+  const requested = String(baseModel || "").trim();
+  const effort = String(reasoningEffort || "").trim();
+  const available = sessionInfo?.models?.availableModels || [];
+  if (requested.includes("/")) {
+    return requested;
+  }
+  const exact = available.find((entry) => entry.modelId === `${requested}/${effort}`);
+  if (exact) return exact.modelId;
+  const baseOnly = available.find((entry) => entry.modelId === requested);
+  if (baseOnly) return baseOnly.modelId;
+  return requested && effort ? `${requested}/${effort}` : requested;
+}
+
 function buildCodexAcpEnv() {
   const env = { ...process.env };
   delete env.OPENAI_API_KEY;
@@ -177,6 +199,18 @@ async function run(agentId, mode, message) {
     mcpServers: [],
   });
   sessionId = session.sessionId;
+
+  const modelId = resolveCodexAcpModelId(session, resolveCodexAcpBaseModel(), resolveCodexAcpReasoningEffort());
+  if (modelId && typeof client.unstable_setSessionModel === "function") {
+    await client.unstable_setSessionModel({ sessionId, modelId });
+  }
+  if (typeof client.setSessionConfigOption === "function") {
+    await client.setSessionConfigOption({
+      sessionId,
+      configId: "reasoning_effort",
+      value: resolveCodexAcpReasoningEffort(),
+    });
+  }
 
   await client.prompt({
     sessionId,

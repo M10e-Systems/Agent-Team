@@ -300,6 +300,15 @@ function buildAgentDiscordEnv(config) {
     TEAM_AGENT_WALL_TIMEOUT: String(
       policy.agentWallTimeout || process.env.TEAM_AGENT_WALL_TIMEOUT || "90s",
     ),
+    TEAM_CODEX_ACP_MODEL: String(
+      policy.codexAcpModel || process.env.TEAM_CODEX_ACP_MODEL || "gpt-5.4",
+    ),
+    TEAM_CODEX_ACP_REASONING_EFFORT: String(
+      policy.agentReasoningEffort || process.env.TEAM_CODEX_ACP_REASONING_EFFORT || "medium",
+    ),
+    TEAM_CODEX_ACP_GLOBAL_REASONING_EFFORT: String(
+      policy.globalAgentReasoningEffort || process.env.TEAM_CODEX_ACP_GLOBAL_REASONING_EFFORT || "low",
+    ),
   };
 }
 
@@ -406,6 +415,38 @@ function resolveCodexAcpCommand() {
   return process.env.TEAM_CODEX_ACP_COMMAND || path.join(ROOT, "node_modules", ".bin", "codex-acp");
 }
 
+function resolveCodexAcpBaseModel(config = globalThis.__discordBrokerConfig) {
+  return String(
+    process.env.TEAM_CODEX_ACP_MODEL ||
+      config?.discord?.responsePolicy?.codexAcpModel ||
+      "gpt-5.4",
+  ).trim();
+}
+
+function resolveCodexAcpReasoningEffort({ config = globalThis.__discordBrokerConfig, forceReply = false, forcedAll = false } = {}) {
+  const policy = config?.discord?.responsePolicy || {};
+  const explicit = process.env.TEAM_CODEX_ACP_REASONING_EFFORT?.trim();
+  if (explicit) return explicit;
+  if (forcedAll) {
+    return String(policy.globalAgentReasoningEffort || process.env.TEAM_CODEX_ACP_GLOBAL_REASONING_EFFORT || "low").trim();
+  }
+  return String(policy.agentReasoningEffort || "medium").trim();
+}
+
+function resolveCodexAcpModelId(sessionInfo, baseModel, reasoningEffort) {
+  const requested = String(baseModel || "").trim();
+  const effort = String(reasoningEffort || "").trim();
+  const available = sessionInfo?.models?.availableModels || [];
+  if (requested.includes("/")) {
+    return requested;
+  }
+  const exact = available.find((entry) => entry.modelId === `${requested}/${effort}`);
+  if (exact) return exact.modelId;
+  const baseOnly = available.find((entry) => entry.modelId === requested);
+  if (baseOnly) return baseOnly.modelId;
+  return requested && effort ? `${requested}/${effort}` : requested;
+}
+
 function buildCodexAcpEnv() {
   const env = { ...process.env };
   delete env.OPENAI_API_KEY;
@@ -458,6 +499,7 @@ class CodexAcpProvider {
       capture: null,
       closed: false,
       initResponse: null,
+      sessionInfo: null,
     };
     this.sessions.set(agentId, handle);
 
@@ -522,22 +564,40 @@ class CodexAcpProvider {
       mcpServers: [],
     });
     handle.sessionId = session.sessionId;
-
-    const model = process.env.TEAM_CODEX_ACP_MODEL?.trim();
-    if (model && typeof handle.client.unstable_setSessionModel === "function") {
-      try {
-        await handle.client.unstable_setSessionModel({ sessionId: handle.sessionId, modelId: model });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`codex-acp model override ignored for ${agentId}: ${message}`);
-      }
-    }
+    handle.sessionInfo = session;
 
     return handle;
   }
 
-  async runTurn({ teamId, agentId, messageText, forceReply, priorTurns = [], direct = false, timeoutMs }) {
+  async applySessionPreferences(handle, { modelId, reasoningEffort }) {
+    if (modelId && typeof handle.client.unstable_setSessionModel === "function") {
+      try {
+        await handle.client.unstable_setSessionModel({ sessionId: handle.sessionId, modelId });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`codex-acp model override ignored for ${handle.agentId}: ${message}`);
+      }
+    }
+    if (reasoningEffort && typeof handle.client.setSessionConfigOption === "function") {
+      try {
+        await handle.client.setSessionConfigOption({
+          sessionId: handle.sessionId,
+          configId: "reasoning_effort",
+          value: reasoningEffort,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`codex-acp reasoning override ignored for ${handle.agentId}: ${message}`);
+      }
+    }
+  }
+
+  async runTurn({ teamId, agentId, messageText, forceReply, priorTurns = [], direct = false, timeoutMs, forcedAll = false }) {
     const handle = await this.getSession(agentId);
+    const baseModel = resolveCodexAcpBaseModel();
+    const reasoningEffort = resolveCodexAcpReasoningEffort({ forceReply, forcedAll });
+    const modelId = resolveCodexAcpModelId(handle.sessionInfo, baseModel, reasoningEffort);
+    await this.applySessionPreferences(handle, { modelId, reasoningEffort });
     const prompt = formatCodexAcpPrompt({
       index: this.index,
       teamId,
@@ -653,6 +713,7 @@ async function runCodexAcpDirect(index, teamId, agentId, messageText, processing
     forceReply: true,
     direct: true,
     timeoutMs: processingTimeoutMs,
+    forcedAll: false,
   });
   return { reply: normalizeVisibleReply(reply, { forceReply: true }) ?? "SILENT" };
 }
@@ -678,6 +739,7 @@ async function runCodexAcpRoom(index, teamId, prompt, forcedAgentIds, perTurnDel
         priorTurns,
         direct: false,
         timeoutMs: processingTimeoutMs,
+        forcedAll: allForced,
       }),
       { forceReply },
     );

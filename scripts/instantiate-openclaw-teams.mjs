@@ -97,7 +97,7 @@ for (const teamEntry of registry) {
     composeLines.push(`    healthcheck:`);
     composeLines.push(`      test: ["CMD", "true"]`);
     composeLines.push(`    volumes:`);
-    composeLines.push(`      - ${path.relative(OUTPUT_DIR, stateDir)}:/home/node/.openclaw`);
+    composeLines.push(`      - ${stateDir}:/home/node/.openclaw`);
     for (const mount of mounts) {
       const hostPath = mount.hostPath || (mount.hostPathEnv ? process.env[mount.hostPathEnv] : null);
       if (!hostPath) continue;
