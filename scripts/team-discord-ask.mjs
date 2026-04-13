@@ -54,6 +54,7 @@ const prompt = `You are replying on Discord as yourself.
 
 The shared discussion rules live in TEAM_DISCUSSION_CONTRACT.md.
 The shared Discord meeting behavior lives in DISCORD_BOT_BEHAVIOR.md.
+If you are the facilitator, your job also includes curating the shared team context and preserving separate agent continuity.
 
 Human message:
 ${userMessage}

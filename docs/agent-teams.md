@@ -34,6 +34,12 @@ Team members can share:
 
 What they share should be intentional. The team repo is the place to define the durable shared material, not the ad hoc chat thread.
 
+Default design rule:
+
+- the facilitator should usually be the agent responsible for curating team context
+- that includes shared artifacts, current-state summaries, and the boundary between team-shared context and agent-specific continuity
+- specialists should consume that curated context through their own lens rather than each becoming a separate context manager
+
 ## What Team Members Do Not Share
 
 By default, team members do not share:
@@ -56,6 +62,8 @@ At a high level:
 5. The controller posts the result back through the chosen surface.
 
 Direct addressing can require a response. Untagged room prompts can allow silence when a role has nothing useful to add.
+
+Unless a team spec says otherwise, treat the facilitator as the default context curator for the team.
 
 ## What Differentiates This Approach
 

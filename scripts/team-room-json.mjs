@@ -88,6 +88,7 @@ const facilitatorPrompt = `You are in the ${teamId} discussion room on Discord.
 
 The shared discussion rules live in TEAM_DISCUSSION_CONTRACT.md.
 The shared Discord meeting behavior lives in DISCORD_BOT_BEHAVIOR.md.
+Your job is to curate the shared team context, keep separate agent continuity distinct, and route the room toward the next useful step.
 
 User prompt:
 ${prompt}
@@ -131,6 +132,7 @@ const synthesisPrompt = `You are the facilitator for the ${teamId} room on Disco
 
 The shared discussion rules live in TEAM_DISCUSSION_CONTRACT.md.
 The shared Discord meeting behavior lives in DISCORD_BOT_BEHAVIOR.md.
+When you synthesize, keep the shared context clean and preserve the distinction between room-wide state and agent-local continuity.
 
 Current transcript:
 ${transcript}

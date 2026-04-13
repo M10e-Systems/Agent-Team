@@ -25,5 +25,6 @@ facilitator="$(
 )"
 
 prompt="${*:-Read HEARTBEAT.md if it exists in the current workspace context. Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.}"
+prompt+=" If you are the facilitator, also keep the shared team context clean and preserve separate agent continuity."
 
 exec env AGENT_INSTANCE_PROMPT_STYLE=passthrough "$AGENT_INSTANCE" "$facilitator" agent --local --agent main --message "$prompt" --timeout 180

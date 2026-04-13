@@ -30,6 +30,13 @@ Each team repo should provide:
 
 The exact workspace file set may vary by team, but the idea is always the same: put durable identity and team behavior in the team repo, not in the operator shell history.
 
+Recommended default:
+
+- the facilitator owns curation of shared context for the team
+- the facilitator helps decide what belongs in host-backed shared workspace storage
+- the facilitator helps preserve the distinction between team-shared context and per-agent continuity
+- specialists should consume that curated context through their own lens rather than each becoming a separate context manager
+
 ## Register Teams
 
 Use `config/team-discovery.json` to declare:
@@ -163,6 +170,7 @@ Recommended habits:
 - use `room` when you want a team discussion
 - use `ask` when you want one specialist voice
 - use `heartbeat` when you want the facilitator to check in on the team
+- use the facilitator to curate durable context, route artifacts into shared workspace storage, and keep agent-specific continuity from getting muddled together
 - use `discord-inject` before live Discord tests when you want to isolate routing or provider behavior
 
 ## Troubleshooting

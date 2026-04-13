@@ -29,6 +29,7 @@ That lets you keep final authority while still getting the benefit of different 
 - Shared memory should be intentional and minimal
 - Role boundaries should reduce noise, not create bureaucracy
 - Track what changed in the real world, not just what the agents said
+- Give the facilitator the job of curating shared context while keeping agent-specific continuity separate
 
 ## Example Team Shapes
 

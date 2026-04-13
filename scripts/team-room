@@ -62,6 +62,8 @@ transcript=$'USER: '"$prompt"
 facilitator_prompt=$(cat <<EOF
 You are in the $team_id team room.
 
+Your job is to curate the shared team context, keep separate agent continuity distinct, and route the room toward the next useful step.
+
 User prompt:
 $prompt
 
@@ -100,6 +102,8 @@ done
 
 synthesis_prompt=$(cat <<EOF
 You are the facilitator for the $team_id room.
+
+When you synthesize, keep the shared context clean and preserve the distinction between room-wide state and agent-local continuity.
 
 Current transcript:
 $transcript
